@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "My Voice",
+  "version": "0.1.0",
+  "identifier": "com.studiointhebox.myvoice",
+  "build": {
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "My Voice",
+        "width": 1080,
+        "height": 780,
+        "minWidth": 640,
+        "minHeight": 520,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
