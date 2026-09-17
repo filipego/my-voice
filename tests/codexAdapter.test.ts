@@ -10,9 +10,7 @@ describe("Codex analysis boundary", () => {
     const proposals = [{ instruction: "Be direct.", evidence: ["Hello"], scope: "email" }];
     vi.mocked(invoke).mockResolvedValue(proposals);
     expect(await runCodexAnalysis({ text: "Hello", maxRules: 3 })).toEqual(proposals);
-    expect(invoke).toHaveBeenCalledWith("run_codex_analysis", {
-      state: { profile: {}, sources: [{ paragraphs: ["Hello"] }] }, maxRules: 3,
-    });
+    expect(invoke).toHaveBeenCalledWith("run_codex_analysis", { text: "Hello", maxRules: 3 });
   });
 
   it("reports the desktop requirement in browser previews", async () => {

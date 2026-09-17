@@ -208,29 +208,12 @@ fn temp_codex_file(suffix: &str) -> PathBuf {
 
 #[tauri::command]
 fn run_codex_analysis(
-    state: AppState,
+    text: String,
     max_rules: Option<u32>,
 ) -> Result<Vec<VoiceProposal>, String> {
     let max_rules = max_rules.unwrap_or(5).clamp(1, 20);
-    let mut text = String::new();
-    for source in state
-        .sources
-        .as_array()
-        .ok_or_else(|| "Writing sources are invalid.".to_string())?
-    {
-        if let Some(paragraphs) = source
-            .get("paragraphs")
-            .and_then(serde_json::Value::as_array)
-        {
-            for paragraph in paragraphs {
-                if let Some(value) = paragraph.as_str() {
-                    text.push_str(value.trim());
-                    text.push_str("\n\n");
-                }
-            }
-        }
-    }
-    if text.trim().is_empty() {
+    let mut text = text.trim().to_string();
+    if text.is_empty() {
         return Err("No approved writing is available to analyze.".to_string());
     }
     text = text.chars().take(24_000).collect();
@@ -300,17 +283,24 @@ fn run_codex_analysis(
 
 #[tauri::command]
 fn check_codex_connection() -> CodexConnection {
-    match Command::new("codex").arg("--version").output() {
-        Ok(output) if output.status.success() => CodexConnection {
-            available: true,
-            authenticated: true,
-            detail: String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        },
-        Ok(output) => CodexConnection {
-            available: false,
-            authenticated: false,
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        },
+    match Command::new("codex").args(["login", "status"]).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let authenticated = output.status.success() && stdout.contains("Logged in");
+            CodexConnection {
+                available: true,
+                authenticated,
+                detail: {
+                    let combined = format!("{stdout}{stderr}");
+                    if combined.trim().is_empty() {
+                        format!("Codex exited with status {}.", output.status.code().unwrap_or(-1))
+                    } else {
+                        combined.trim().to_string()
+                    }
+                },
+            }
+        }
         Err(error) => CodexConnection {
             available: false,
             authenticated: false,

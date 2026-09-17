@@ -69,10 +69,7 @@ export async function runCodexAnalysis(request: CodexAnalysisRequest): Promise<V
   if (!request.text.trim()) throw new Error("No approved writing is available to analyze.");
   const maxRules = Math.max(1, Math.min(20, Math.floor(request.maxRules ?? 5)));
   try {
-    const result = await invoke<unknown>("run_codex_analysis", {
-      state: { profile: {}, sources: [{ paragraphs: [request.text] }] },
-      maxRules,
-    });
+    const result = await invoke<unknown>("run_codex_analysis", { text: request.text, maxRules });
     return parseVoiceProposals(result, maxRules);
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
