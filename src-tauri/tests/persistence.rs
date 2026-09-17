@@ -13,10 +13,7 @@ fn database_round_trips_voice_state() {
 
     let profile = serde_json::json!({"currentVersion": 7});
     let sources = serde_json::json!({"lastSavedAt": "2026-09-16T21:00:00Z"});
-    let state = AppState {
-        profile,
-        sources,
-    };
+    let state = AppState { profile, sources };
 
     database.save_state(state).expect("state saves");
     let reloaded = database.load_state().expect("state reloads");

@@ -11,6 +11,12 @@ export interface AppState {
   sources: WritingSource[];
 }
 
+export interface SkillPublication {
+  path: string;
+  backupPath: string | null;
+  version: number;
+}
+
 const storageKey = "my-voice-state-v1";
 
 function tauriInvoke(): TauriInternals["invoke"] | null {
@@ -53,6 +59,43 @@ export async function saveState(state: AppState): Promise<void> {
   }
 
   localStorage.setItem(storageKey, JSON.stringify(state));
+}
+
+export async function publishVoiceSkill(
+  name: string,
+  version: number,
+  markdown: string,
+): Promise<SkillPublication> {
+  const invoke = tauriInvoke();
+  if (!invoke) throw new Error("Publishing requires the My Voice desktop app.");
+
+  const result = (await invoke("publish_voice_skill", {
+    request: { name, version, markdown },
+  })) as { path: string; backup_path: string | null; version: number };
+
+  return {
+    path: result.path,
+    backupPath: result.backup_path,
+    version: result.version,
+  };
+}
+
+export async function restoreVoiceSkill(
+  path: string,
+  backupPath: string | null,
+): Promise<SkillPublication> {
+  const invoke = tauriInvoke();
+  if (!invoke) throw new Error("Restoring requires the My Voice desktop app.");
+
+  const result = (await invoke("restore_voice_skill", {
+    request: { path, backup_path: backupPath },
+  })) as { path: string; backup_path: string | null; version: number };
+
+  return {
+    path: result.path,
+    backupPath: result.backup_path,
+    version: result.version,
+  };
 }
 
 export function deleteSourceEvidence(

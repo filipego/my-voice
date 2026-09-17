@@ -118,6 +118,13 @@ textarea { resize: vertical; line-height: 1.45; }
   border-radius: 8px;
 }
 
+.publish-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
 
 @media (max-width: 760px) {
