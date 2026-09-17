@@ -5,6 +5,7 @@ import Library from "./components/Library";
 import MyVoice from "./components/MyVoice";
 import TeachMyVoice from "./components/TeachMyVoice";
 import TestAndUse from "./components/TestAndUse";
+import { runCodexAnalysis } from "./core/codexAdapter";
 
 type Tab = "library" | "profile" | "teach" | "test";
 
@@ -80,7 +81,9 @@ export default function App() {
       <main>
         {tab === "library" && <Library state={state} setState={setState} />}
         {tab === "profile" && <MyVoice state={state} setState={setState} />}
-        {tab === "teach" && <TeachMyVoice state={state} setState={setState} />}
+        {tab === "teach" && (
+          <TeachMyVoice state={state} setState={setState} runCodexAnalysis={runCodexAnalysis} />
+        )}
         {tab === "test" && <TestAndUse state={state} setState={setState} />}
       </main>
 

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import Library from "../src/components/Library";
 import TeachMyVoice from "../src/components/TeachMyVoice";
 import TestAndUse from "../src/components/TestAndUse";
+import type { VoiceProposal } from "../src/core/codexAdapter";
 import { initialProfile, proposeRule, publishProfile } from "../src/core/profileEngine";
 import { createSource } from "../src/core/sourceImport";
 import type { AppState } from "../src/core/storage";
@@ -28,7 +29,7 @@ function appState(): AppState {
     origin: "writing-sample",
   });
 
-  return { profile, sources: [source] };
+  return { profile, sources: [{ ...source, status: "approved" }] };
 }
 
 describe("Library source deletion", () => {
@@ -92,6 +93,38 @@ describe("Teach correction actions", () => {
 });
 
 describe("Teach Codex proposals", () => {
+  it("runs native analysis and adds returned proposals for review", async () => {
+    const setState = vi.fn();
+    const runCodexAnalysis = vi.fn().mockResolvedValue([
+      { instruction: "Open with the request.", evidence: ["Can we meet?"], scope: "email" },
+    ] satisfies VoiceProposal[]);
+    render(<TeachMyVoice state={appState()} setState={setState} runCodexAnalysis={runCodexAnalysis} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyze approved writing" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Codex analysis finished.",
+    );
+    expect(runCodexAnalysis).toHaveBeenCalledTimes(1);
+    expect(setState).toHaveBeenCalledTimes(1);
+    const nextRule = setState.mock.calls[0][0].profile.rules[2];
+    expect(nextRule.instruction).toBe("Open with the request.");
+    expect(nextRule.scope).toBe("email");
+    expect(nextRule.state).toBe("proposed");
+    expect(nextRule.origin).toBe("direct-instruction");
+  });
+
+  it("reports native-analysis failure without changing state", async () => {
+    const setState = vi.fn();
+    const runCodexAnalysis = vi.fn().mockRejectedValue(new Error("Codex analysis failed."));
+    render(<TeachMyVoice state={appState()} setState={setState} runCodexAnalysis={runCodexAnalysis} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyze approved writing" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Codex analysis failed.");
+    expect(setState).not.toHaveBeenCalled();
+  });
+
   it("accepts valid Codex proposal JSON as proposed rules", () => {
     const setState = vi.fn();
     render(<TeachMyVoice state={appState()} setState={setState} />);

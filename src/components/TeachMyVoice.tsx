@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { VoiceProposal } from "../core/codexAdapter";
 import type { AppState } from "../core/storage";
 import { classifyChanges, proposeCorrectionRules } from "../core/diffEngine";
 import { proposeRule } from "../core/profileEngine";
@@ -7,16 +8,29 @@ import type { RuleScope } from "../core/profileEngine";
 interface Props {
   state: AppState;
   setState: (value: AppState) => void;
+  runCodexAnalysis?: (request: { text: string; maxRules: number }) => Promise<VoiceProposal[]>;
 }
 
-export default function TeachMyVoice({ state, setState }: Props) {
+export default function TeachMyVoice({ state, setState, runCodexAnalysis }: Props) {
   const [before, setBefore] = useState("");
   const [after, setAfter] = useState("");
   const [codexProposals, setCodexProposals] = useState("");
   const [codexError, setCodexError] = useState<string | null>(null);
+  const [codexStatus, setCodexStatus] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scope, setScope] = useState<"core" | "email" | "essay" | "plan" | "other">("email");
   const changes = before && after ? classifyChanges(before, after) : [];
   const proposals = proposeCorrectionRules(changes, scope);
+  const approvedText = useMemo(
+    () =>
+      state.sources
+        .filter((source) => source.status === "approved")
+        .flatMap((source) => source.paragraphs)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean)
+        .join("\n\n"),
+    [state.sources],
+  );
 
   function remember(index: number, action: "remember" | "context-only") {
     const proposal = proposals[index];
@@ -84,6 +98,36 @@ export default function TeachMyVoice({ state, setState }: Props) {
     });
   }
 
+  async function analyzeApprovedWriting() {
+    if (!runCodexAnalysis) return;
+
+    setIsAnalyzing(true);
+    setCodexError(null);
+    setCodexStatus("Running Codex analysis...");
+
+    try {
+      const returned = await runCodexAnalysis({ text: approvedText, maxRules: 5 });
+      const nextProfile = returned.reduce(
+        (profile, proposal) =>
+          proposeRule(profile, {
+            instruction: proposal.instruction,
+            evidence: proposal.evidence,
+            scope: proposal.scope,
+            origin: "direct-instruction",
+          }),
+        state.profile,
+      );
+
+      setState({ ...state, profile: nextProfile });
+      setCodexStatus("Codex analysis finished.");
+    } catch (error) {
+      setCodexStatus(null);
+      setCodexError(error instanceof Error ? error.message : "Codex analysis failed.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
   return (
     <section className="panel" aria-labelledby="teach-heading">
       <h2 id="teach-heading">Teach from a correction</h2>
@@ -130,6 +174,20 @@ export default function TeachMyVoice({ state, setState }: Props) {
       </ul>
 
       <h2>Codex proposals</h2>
+      <div className="action-row">
+        <button
+          type="button"
+          onClick={analyzeApprovedWriting}
+          disabled={!runCodexAnalysis || isAnalyzing || !approvedText}
+        >
+          {isAnalyzing ? "Analyzing..." : "Analyze approved writing"}
+        </button>
+        {codexStatus && (
+          <p role="status" className="status">
+            {codexStatus}
+          </p>
+        )}
+      </div>
       <label>
         Codex proposals
         <textarea
