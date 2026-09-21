@@ -413,8 +413,20 @@ fn deliver_prompt_and_supervise(
         None
     };
     let supervision = supervise_prompt_and_child(child, &writer_rx, cancel_flag, deadline);
+    #[cfg(unix)]
     if let Some(writer) = writer {
         let _ = writer.join();
+    }
+    #[cfg(not(unix))]
+    if let Some(writer) = writer {
+        if supervision.is_err() {
+            let _ = writer_rx.recv_timeout(Duration::from_millis(250));
+        }
+        if supervision.is_ok() {
+            let _ = writer.join();
+        }
+        // On platforms without process groups, an inherited stdin may outlive
+        // the launcher. Dropping the unresolved writer is the bounded fallback.
     }
     supervision
 }
