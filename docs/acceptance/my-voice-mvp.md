@@ -29,4 +29,5 @@ Date: 2026-09-21
 - The packaged window was exposed to the desktop verifier as `My Voice`.
 - Exercised Library → Test & Use → draft generation, editable final revision, Transfer correction pair, Teach prefill, and Just this time.
 - Published to `/Users/filipego/.codex/skills/my-voice` and received the visible status `Published selection verified.` with `Published manifest matches the requested area and profile version.` for Core/profile v1.
-- Publication still reports reload guidance because live Codex discovery after reload was not independently observed.
+- Codex local prompt assembly now lists `my-voice: Personal writing voice guidance for my-voice` under available skills after republish, proving local discovery without sending private skill contents to a model.
+- The app still reports reload guidance because an already-running Codex session may need to refresh its skill snapshot.
