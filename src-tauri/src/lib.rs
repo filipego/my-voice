@@ -867,7 +867,12 @@ mod tests {
     #[test]
     fn early_launcher_exit_does_not_leave_writer_or_descendant_hanging() {
         let pid_path = temp_codex_file("early-descendant.pid");
-        let script = format!("sleep 5 & echo $! > {}; exit 0", pid_path.display());
+        let marker_path = temp_codex_file("early-descendant.exit");
+        let script = format!(
+            "trap 'echo exited > {}' EXIT; exec 3<&0; sleep 5 0<&3 & echo $! > {}; exit 0",
+            marker_path.display(),
+            pid_path.display()
+        );
         let mut command = Command::new("sh");
         command
             .args(["-c", &script])
@@ -887,7 +892,7 @@ mod tests {
             )
         });
         let deadline = Instant::now() + Duration::from_secs(1);
-        while !pid_path.exists() && Instant::now() < deadline {
+        while (!pid_path.exists() || !marker_path.exists()) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
         flag.store(true, Ordering::Relaxed);
@@ -913,6 +918,7 @@ mod tests {
             "early launcher descendant should be terminated"
         );
         let _ = fs::remove_file(pid_path);
+        let _ = fs::remove_file(marker_path);
     }
 
     #[test]
