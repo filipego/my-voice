@@ -26,7 +26,12 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   const [audience, setAudience] = useState("");
   const [activeRecord, setActiveRecord] = useState<CorrectionRecord | null>(null);
   const changes = before && after ? classifyChanges(before, after) : [];
-  const proposals = proposeCorrectionRules(changes, scope);
+  const rejectedProposalIds = new Set(
+    (state.corrections ?? [])
+      .filter((record) => record.generatedDraft === before && record.finalRevision === after)
+      .flatMap((record) => record.proposals.filter((proposal) => proposal.rejected).map((proposal) => proposal.id)),
+  );
+  const proposals = proposeCorrectionRules(changes, scope).filter((_, index) => !rejectedProposalIds.has(`proposal_edit_${index + 1}`));
   const approvedText = useMemo(
     () =>
       state.sources
