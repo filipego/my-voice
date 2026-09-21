@@ -893,6 +893,7 @@ fn restore_skill_package(root: &PathBuf, skill_path: PathBuf, backup_path: Optio
     if skill_path.exists() { read_installed_manifest(&skill_path)?; }
     if let Some(backup_path) = backup_path {
         if !backup_path.starts_with(root.join("backups")) || backup_path.parent() != Some(root.join("backups").as_path()) || !backup_path.is_dir() { return Err("The selected skill backup does not exist.".to_string()); }
+        read_installed_manifest(&backup_path)?;
         let displaced = root.join(format!(".restore-displaced-{}", SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_millis()));
         if skill_path.exists() { fs::rename(&skill_path, &displaced).map_err(|error| error.to_string())?; }
         if let Err(error) = fs::rename(&backup_path, &skill_path) {

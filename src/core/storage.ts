@@ -2,6 +2,7 @@ import type { Profile } from "./profileEngine";
 import { initialProfile, publishProfile } from "./profileEngine";
 import type { WritingSource } from "./sourceImport";
 import type { CorrectionRecord } from "./correctionEngine";
+import type { AntiSlopConfig } from "./antiSlop";
 
 interface TauriInternals {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -11,6 +12,7 @@ export interface AppState {
   profile: Profile;
   sources: WritingSource[];
   corrections?: CorrectionRecord[];
+  antiSlop?: AntiSlopConfig;
 }
 
 export interface SkillPublication {
@@ -42,6 +44,7 @@ export function normalizeAppState(input: unknown): AppState {
   const rawProfile = isRecord(candidate.profile) ? candidate.profile : {};
   const sources = Array.isArray(candidate.sources) ? candidate.sources : [];
   const corrections = Array.isArray(candidate.corrections) ? candidate.corrections : undefined;
+  const antiSlop = isRecord(candidate.antiSlop) ? candidate.antiSlop as AntiSlopConfig : undefined;
 
   if (
     Array.isArray(rawProfile.rules) &&
@@ -57,6 +60,7 @@ export function normalizeAppState(input: unknown): AppState {
       } as Profile,
       sources,
       ...(corrections ? { corrections } : {}),
+      ...(antiSlop ? { antiSlop } : {}),
     };
   }
 
@@ -72,6 +76,7 @@ export function normalizeAppState(input: unknown): AppState {
     },
     sources,
     ...(corrections ? { corrections } : {}),
+    ...(antiSlop ? { antiSlop } : {}),
   };
 }
 

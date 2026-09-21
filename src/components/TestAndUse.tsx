@@ -34,7 +34,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   const [status, setStatus] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const compiled = useMemo(() => compileSkillPackage(state.profile), [state.profile]);
+  const compiled = useMemo(() => compileSkillPackage(state.profile, { antiSlop: state.antiSlop }), [state.profile, state.antiSlop]);
 
   async function handleGenerateDrafts() {
     if (!prompt.trim()) return;
