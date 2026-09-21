@@ -1,11 +1,17 @@
 export type RuleScope = "core" | "email" | "essay" | "plan" | "other";
-export type RuleState = "proposed" | "approved" | "rejected" | "locked";
+export type RuleState = "proposed" | "approved" | "rejected" | "locked" | "superseded";
 export type ProposalOrigin = "direct-instruction" | "correction-pair" | "writing-sample";
+
+export interface EvidenceRecord {
+  sourceId: string;
+  paragraphId: string;
+  excerpt: string;
+}
 
 export interface VoiceRule {
   id: string;
   instruction: string;
-  evidence: string[];
+  evidence: Array<EvidenceRecord | string>;
   sourceIds?: string[];
   scope: RuleScope;
   state: RuleState;
@@ -51,7 +57,7 @@ export function proposeRule(
   profile: Profile,
   proposal: {
     instruction: string;
-    evidence?: string[];
+    evidence?: Array<EvidenceRecord | string>;
     scope?: RuleScope;
     origin: ProposalOrigin;
     confidence?: VoiceRule["confidence"];
@@ -80,12 +86,38 @@ export function proposeRule(
   return next;
 }
 
+export function editRule(profile: Profile, ruleId: string, instruction: string): Profile {
+  const rule = profile.rules.find((item) => item.id === ruleId);
+  if (!rule || rule.state === "locked" || !instruction.trim()) return profile;
+  const now = new Date().toISOString();
+  return { ...profile, rules: profile.rules.map((item) => item.id === ruleId ? { ...item, instruction: instruction.trim(), updatedAt: now } : item) };
+}
+
+export function supersedeRule(
+  profile: Profile,
+  ruleId: string,
+  proposal: Parameters<typeof proposeRule>[1],
+): Profile {
+  const rule = profile.rules.find((item) => item.id === ruleId);
+  if (!rule || rule.state === "locked") return profile;
+  const now = new Date().toISOString();
+  const superseded = { ...profile, rules: profile.rules.map((item) => item.id === ruleId ? { ...item, state: "superseded" as const, updatedAt: now } : item) };
+  return proposeRule(superseded, proposal);
+}
+
+export function resolveContradiction(profile: Profile, keepRuleId: string, rejectRuleIds: string[]): Profile {
+  const now = new Date().toISOString();
+  return { ...profile, rules: profile.rules.map((rule) => rejectRuleIds.includes(rule.id) && rule.id !== keepRuleId && rule.state !== "locked" ? { ...rule, state: "rejected" as const, updatedAt: now } : rule) };
+}
+
 export function setRuleState(
   profile: Profile,
   ruleId: string,
   state: Exclude<RuleState, "proposed">,
 ): Profile {
   const now = new Date().toISOString();
+  const current = profile.rules.find((rule) => rule.id === ruleId);
+  if (!current || current.state === "locked") return profile;
   return {
     ...profile,
     rules: profile.rules.map((rule) =>

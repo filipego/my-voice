@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import Library from "../src/components/Library";
+import MyVoice from "../src/components/MyVoice";
 import TeachMyVoice from "../src/components/TeachMyVoice";
 import TestAndUse from "../src/components/TestAndUse";
 import type { VoiceProposal } from "../src/core/codexAdapter";
@@ -48,6 +49,29 @@ describe("Library source deletion", () => {
 
     expect(setState).toHaveBeenCalledTimes(1);
     expect(setState.mock.calls[0][0].sources).toHaveLength(0);
+  });
+
+  it("shows affected rules before confirming source deletion", () => {
+    const state = appState();
+    const source = state.sources[0];
+    const next = { ...state, profile: { ...state.profile, rules: state.profile.rules.map((rule) => ({ ...rule, sourceIds: [source.id] })) } };
+    const setState = vi.fn();
+    render(<Library state={next} setState={setState} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/will remove .* rule/i)).toBeInTheDocument();
+  });
+});
+
+describe("My Voice rule review", () => {
+  it("edits a rule and saves a profile version", () => {
+    const state = appState();
+    const setState = vi.fn();
+    render(<MyVoice state={state} setState={setState} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Edit rule" }), { target: { value: "State the request plainly." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save rule" }));
+    expect(setState.mock.calls[0][0].profile.rules[0].instruction).toBe("State the request plainly.");
+    expect(setState.mock.calls[0][0].profile.versions).toHaveLength(2);
   });
 });
 

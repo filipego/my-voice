@@ -109,4 +109,16 @@ describe("source deletion", () => {
     };
     expect(deleteSourceEvidence({ profile, sources: [source, keptSource] }, source.id).profile.rules.map((rule) => rule.instruction)).toEqual(["Use concrete examples.", "Keep short sentences."]);
   });
+
+  it("removes an active rule when its only linked paragraph is deleted", () => {
+    const source = createSource("Linked evidence.", { title: "Linked" });
+    const profile = proposeRule(initialProfile, {
+      instruction: "Use linked evidence.",
+      origin: "writing-sample",
+      evidence: [{ sourceId: source.id, paragraphId: source.paragraphDecisions[0].id, excerpt: source.paragraphs[0] }],
+    });
+    const result = deleteSourceEvidence({ profile, sources: [source] }, source.id);
+    expect(result.profile.rules).toHaveLength(0);
+    expect(result.sources).toHaveLength(0);
+  });
 });

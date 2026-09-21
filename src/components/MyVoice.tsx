@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { AppState } from "../core/storage";
-import { proposeRule, publishProfile, setRuleState } from "../core/profileEngine";
+import { editRule, publishProfile, setRuleState, supersedeRule } from "../core/profileEngine";
 
 interface Props {
   state: AppState;
@@ -7,8 +8,19 @@ interface Props {
 }
 
 export default function MyVoice({ state, setState }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
   function update(id: string, next: Exclude<AppState["profile"]["rules"][number]["state"], "proposed">) {
-    setState({ ...state, profile: setRuleState(state.profile, id, next) });
+    const changed = setRuleState(state.profile, id, next);
+    if (changed === state.profile) return;
+    setState({ ...state, profile: publishProfile(changed, `Rule ${next}.`) });
+  }
+
+  function saveEdit(id: string) {
+    const changed = editRule(state.profile, id, editText);
+    if (changed === state.profile) return;
+    setState({ ...state, profile: publishProfile(changed, "Edited voice rule.") });
+    setEditingId(null);
   }
 
   function publish() {
@@ -22,11 +34,17 @@ export default function MyVoice({ state, setState }: Props) {
       <ul className="rule-list">
         {state.profile.rules.map((rule) => (
           <li key={rule.id}>
-            <p className="rule-text">{rule.instruction}</p>
+            {editingId === rule.id ? (
+              <div className="action-row">
+                <input aria-label="Edit rule" value={editText} onChange={(event) => setEditText(event.target.value)} />
+                <button type="button" className="chip" onClick={() => saveEdit(rule.id)}>Save rule</button>
+                <button type="button" className="chip" onClick={() => setEditingId(null)}>Cancel</button>
+              </div>
+            ) : <p className="rule-text">{rule.instruction}</p>}
             <p className="rule-meta">{rule.scope} · {rule.state} · {rule.confidence}</p>
             <ul className="evidence-list">
               {rule.evidence.map((item, index) => (
-                <li key={`${rule.id}-${index}`}>{item}</li>
+                <li key={`${rule.id}-${index}`}>{typeof item === "string" ? item : `${item.excerpt} (source ${item.sourceId}, paragraph ${item.paragraphId})`}</li>
               ))}
             </ul>
             <div className="action-row">
@@ -35,6 +53,11 @@ export default function MyVoice({ state, setState }: Props) {
                   {choice}
                 </button>
               ))}
+              <button type="button" className="chip" disabled={rule.state === "locked"} onClick={() => { setEditingId(rule.id); setEditText(rule.instruction); }}>Edit</button>
+              <button type="button" className="chip" disabled={rule.state === "locked"} onClick={() => {
+                const next = supersedeRule(state.profile, rule.id, { instruction: `${rule.instruction} (revised)`, origin: rule.origin, scope: rule.scope, evidence: rule.evidence });
+                if (next !== state.profile) setState({ ...state, profile: publishProfile(next, "Superseded voice rule.") });
+              }}>Supersede</button>
             </div>
           </li>
         ))}

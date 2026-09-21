@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { AppState } from "../core/storage";
+import { deleteSourceEvidence, sourceEvidenceImpact, type AppState } from "../core/storage";
 import { createSource, importWritingFile, isDuplicateText, normalizedDuplicateKey, type ImportPreview } from "../core/sourceImport";
 
 interface Props {
@@ -108,10 +108,7 @@ export default function Library({ state, setState }: Props) {
   }
 
   function deleteSource(id: string) {
-    setState({
-      ...state,
-      sources: state.sources.filter((source) => source.id !== id),
-    });
+    setState(deleteSourceEvidence(state, id));
     setPendingDeleteId(null);
   }
 
@@ -207,6 +204,11 @@ export default function Library({ state, setState }: Props) {
               </button>
               {pendingDeleteId === source.id && (
                 <>
+                  {sourceEvidenceImpact(state, source.id) > 0 && (
+                    <p className="warning" role="alert">
+                      Deleting this source will remove {sourceEvidenceImpact(state, source.id)} linked rule{sourceEvidenceImpact(state, source.id) === 1 ? "" : "s"}.
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="chip danger"

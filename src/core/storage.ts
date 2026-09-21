@@ -146,15 +146,41 @@ export function deleteSourceEvidence(
   const source = state.sources.find((item) => item.id === sourceId);
   if (!source) return state;
 
+  const impactedRuleIds = new Set(
+    state.profile.rules
+      .filter((rule) => {
+        const remainingSourceIds = (rule.sourceIds ?? []).filter((id) => id !== sourceId);
+        const remainingEvidence = rule.evidence.filter((evidence) =>
+          typeof evidence !== "string" ? evidence.sourceId !== sourceId : !source.paragraphs.includes(evidence),
+        );
+        const referencesSource = rule.sourceIds?.includes(sourceId) || rule.evidence.some((evidence) =>
+          typeof evidence !== "string" ? evidence.sourceId === sourceId : source.paragraphs.includes(evidence),
+        );
+        return Boolean(referencesSource && remainingSourceIds.length === 0 && remainingEvidence.length === 0);
+      })
+      .map((rule) => rule.id),
+  );
   return {
     profile: {
       ...state.profile,
-      rules: state.profile.rules.filter(
-        (rule) =>
-          !rule.sourceIds?.includes(sourceId) &&
-          !rule.evidence.some((excerpt) => source.paragraphs.includes(excerpt)),
-      ),
+      rules: state.profile.rules.filter((rule) => !impactedRuleIds.has(rule.id)),
     },
     sources: state.sources.filter((item) => item.id !== sourceId),
   };
+}
+
+export function sourceEvidenceImpact(state: AppState, sourceId: string): number {
+  const source = state.sources.find((item) => item.id === sourceId);
+  if (!source) return 0;
+  return state.profile.rules.filter((rule) =>
+    Boolean(
+      (rule.sourceIds?.includes(sourceId) || rule.evidence.some((evidence) =>
+        typeof evidence !== "string" ? evidence.sourceId === sourceId : source.paragraphs.includes(evidence),
+      )) &&
+      (rule.sourceIds ?? []).filter((id) => id !== sourceId).length === 0 &&
+      rule.evidence.filter((evidence) =>
+        typeof evidence !== "string" ? evidence.sourceId !== sourceId : !source.paragraphs.includes(evidence),
+      ).length === 0,
+    ),
+  ).length;
 }
