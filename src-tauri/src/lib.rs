@@ -179,6 +179,25 @@ struct RestoreSkillRequest {
     backup_path: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct VerifySkillRequest {
+    path: String,
+    #[serde(rename = "areaId")]
+    area_id: String,
+    #[serde(rename = "profileVersion")]
+    profile_version: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct SkillVerification {
+    verified: bool,
+    #[serde(rename = "areaId")]
+    area_id: String,
+    #[serde(rename = "profileVersion")]
+    profile_version: u32,
+    detail: String,
+}
+
 #[derive(Debug, Serialize)]
 struct SkillPublication {
     path: String,
@@ -924,6 +943,23 @@ fn restore_voice_skill(
     restore_skill_package(&root, skill_path, request.backup_path.map(PathBuf::from))
 }
 
+#[tauri::command]
+fn verify_voice_skill(app: tauri::AppHandle, request: VerifySkillRequest) -> Result<SkillVerification, String> {
+    let root = skill_root(&app)?;
+    let path = PathBuf::from(&request.path);
+    if !path.is_absolute() || path.parent() != Some(root.as_path()) || path.file_name().is_none() {
+        return Err("Skill verification path is outside the My Voice skill folder.".to_string());
+    }
+    read_installed_manifest(&path)?;
+    let manifest: serde_json::Value = serde_json::from_str(&fs::read_to_string(path.join("manifest.json")).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("Invalid skill manifest: {error}"))?;
+    let version = manifest.get("profileVersion").and_then(serde_json::Value::as_u64).unwrap_or_default() as u32;
+    let areas = manifest.get("areaIds").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    let area_present = request.area_id == "core" || areas.iter().any(|area| area.as_str() == Some(request.area_id.as_str()));
+    let verified = version == request.profile_version && area_present;
+    Ok(SkillVerification { verified, area_id: request.area_id, profile_version: version, detail: if verified { "Published manifest matches the requested area and profile version.".into() } else { "Published manifest does not match the requested area or profile version.".into() } })
+}
+
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let path = app_database_path(&handle)?;
@@ -944,7 +980,8 @@ pub fn run_app() {
             cancel_codex_job,
             check_codex_connection,
             publish_voice_skill,
-            restore_voice_skill
+            restore_voice_skill,
+            verify_voice_skill
         ])
         .run(tauri::generate_context!())
         .expect("failed to run My Voice");

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AppState } from "../core/storage";
-import { publishVoiceSkill, restoreVoiceSkill } from "../core/storage";
+import { publishVoiceSkill, restoreVoiceSkill, verifyVoiceSkill } from "../core/storage";
 import { compileSkillPackage } from "../core/skillCompiler";
 import { applyAntiSlopDecision, detectAntiSlopWarnings, type AntiSlopDecision } from "../core/antiSlop";
 import { rollbackToVersion } from "../core/profileEngine";
@@ -33,6 +33,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
     backupPath: string | null;
   } | null>(null);
   const [status, setStatus] = useState("");
+  const [verification, setVerification] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const compiled = useMemo(() => compileSkillPackage(state.profile, { antiSlop: state.antiSlop }), [state.profile, state.antiSlop]);
@@ -76,6 +77,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
         compiled.manifest,
       );
       setPublication({ path: result.path, backupPath: result.backupPath });
+      setVerification(null);
       const reloadNote = result.status === "needs-reload" || result.status === "pending-update"
         ? " Reload Codex to discover the change."
         : " Codex discovery is not verified yet; reload before relying on it.";
@@ -93,6 +95,19 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
       setStatus(publication.backupPath ? "Previous skill restored." : "Published skill removed.");
       setPublication(null);
     } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleVerify() {
+    if (!publication) return;
+    setStatus("Verifying published selection...");
+    try {
+      const result = await verifyVoiceSkill(publication.path, areaId, state.profile.currentVersion);
+      setVerification(result.detail);
+      setStatus(result.verified ? "Published selection verified." : "Published selection mismatch.");
+    } catch (error) {
+      setVerification(null);
       setStatus(error instanceof Error ? error.message : String(error));
     }
   }
@@ -146,12 +161,14 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
             Restore previous
           </button>
         )}
+        {publication && <button type="button" className="chip" onClick={handleVerify}>Verify area/version</button>}
       </div>
       <p className="note">
         Compiled skill: <code>{compiled.manifest.skillName}</code> v{compiled.manifest.profileVersion}. Publishing writes locally
         to the My Voice skill folder.
       </p>
       {status && <p role="status">{status}</p>}
+      {verification && <p role="status" className="note">{verification}</p>}
 
       <h2>Version history</h2>
       {state.profile.versions.length === 0 && <p className="empty">No saved versions yet.</p>}

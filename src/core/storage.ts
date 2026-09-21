@@ -22,6 +22,13 @@ export interface SkillPublication {
   status?: "installed" | "pending-update" | "external-changes" | "needs-reload";
 }
 
+export interface SkillVerification {
+  verified: boolean;
+  areaId: string;
+  profileVersion: number;
+  detail: string;
+}
+
 const storageKey = "my-voice-state-v1";
 
 function tauriInvoke(): TauriInternals["invoke"] | null {
@@ -152,6 +159,12 @@ export async function restoreVoiceSkill(
     version: result.version,
     status: (result as { status?: SkillPublication["status"] }).status,
   };
+}
+
+export async function verifyVoiceSkill(path: string, areaId: string, profileVersion: number): Promise<SkillVerification> {
+  const invoke = tauriInvoke();
+  if (!invoke) throw new Error("Verification requires the My Voice desktop app.");
+  return (await invoke("verify_voice_skill", { request: { path, areaId, profileVersion } })) as SkillVerification;
 }
 
 export function deleteSourceEvidence(
