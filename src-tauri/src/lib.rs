@@ -1248,7 +1248,7 @@ mod tests {
         assert!(status.authenticated);
     }
 
-    fn package_fixture(root: &PathBuf) -> SkillRequest {
+    fn package_fixture(_root: &PathBuf) -> SkillRequest {
         let content = "# My Voice\n";
         let checksum = package_checksum(content);
         let manifest = serde_json::json!({"skillName":"my-voice","profileVersion":1,"areaIds":[],"generatedAt":"2026-01-01T00:00:00Z","checksums":{"SKILL.md":checksum}});
