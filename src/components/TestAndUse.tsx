@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AppState } from "../core/storage";
 import { publishVoiceSkill, restoreVoiceSkill } from "../core/storage";
-import { compileSkill } from "../core/skillCompiler";
+import { compileSkillPackage } from "../core/skillCompiler";
 import { rollbackToVersion } from "../core/profileEngine";
 import { generateDraft as generateDraftWithCodex, type GeneratedDraft } from "../core/codexAdapter";
 
@@ -34,7 +34,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   const [status, setStatus] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const compiled = useMemo(() => compileSkill(state.profile), [state.profile]);
+  const compiled = useMemo(() => compileSkillPackage(state.profile), [state.profile]);
 
   async function handleGenerateDrafts() {
     if (!prompt.trim()) return;
@@ -63,9 +63,11 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
     setStatus("Publishing...");
     try {
       const result = await publishVoiceSkill(
-        compiled.name,
-        compiled.version,
-        compiled.markdown,
+        compiled.manifest.skillName,
+        compiled.manifest.profileVersion,
+        compiled.files["SKILL.md"],
+        compiled.files,
+        compiled.manifest,
       );
       setPublication({ path: result.path, backupPath: result.backupPath });
       setStatus(
@@ -98,7 +100,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
           Brief
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={8} placeholder="What are you writing?" />
         </label>
-        <pre className="skill-preview" aria-label="Compiled skill">{compiled.markdown}</pre>
+        <pre className="skill-preview" aria-label="Compiled skill">{compiled.files["SKILL.md"]}</pre>
       </div>
       <div className="form-grid">
         <label>Audience<input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Who is this for?" /></label>
@@ -135,7 +137,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
         )}
       </div>
       <p className="note">
-        Compiled skill: <code>{compiled.name}</code> v{compiled.version}. Publishing writes locally
+        Compiled skill: <code>{compiled.manifest.skillName}</code> v{compiled.manifest.profileVersion}. Publishing writes locally
         to the My Voice skill folder.
       </p>
       {status && <p role="status">{status}</p>}

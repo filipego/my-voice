@@ -17,6 +17,7 @@ export interface SkillPublication {
   path: string;
   backupPath: string | null;
   version: number;
+  status?: "installed" | "pending-update" | "external-changes" | "needs-reload";
 }
 
 const storageKey = "my-voice-state-v1";
@@ -111,18 +112,21 @@ export async function publishVoiceSkill(
   name: string,
   version: number,
   markdown: string,
+  files: Record<string, string> = { "SKILL.md": markdown },
+  manifest?: unknown,
 ): Promise<SkillPublication> {
   const invoke = tauriInvoke();
   if (!invoke) throw new Error("Publishing requires the My Voice desktop app.");
 
   const result = (await invoke("publish_voice_skill", {
-    request: { name, version, markdown },
+    request: { name, version, markdown, files, manifest },
   })) as { path: string; backup_path: string | null; version: number };
 
   return {
     path: result.path,
     backupPath: result.backup_path,
     version: result.version,
+    status: (result as { status?: SkillPublication["status"] }).status,
   };
 }
 
@@ -141,6 +145,7 @@ export async function restoreVoiceSkill(
     path: result.path,
     backupPath: result.backup_path,
     version: result.version,
+    status: (result as { status?: SkillPublication["status"] }).status,
   };
 }
 

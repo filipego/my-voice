@@ -167,6 +167,10 @@ struct SkillRequest {
     name: String,
     version: u32,
     markdown: String,
+    #[serde(default)]
+    files: HashMap<String, String>,
+    #[serde(default)]
+    manifest: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -180,6 +184,7 @@ struct SkillPublication {
     path: String,
     backup_path: Option<String>,
     version: u32,
+    status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -750,42 +755,126 @@ fn skill_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+fn package_checksum(value: &str) -> String {
+    let mut hash: u32 = 2_166_136_261;
+    for byte in value.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    format!("fnv1a-{hash:08x}")
+}
+
+fn safe_package_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    if candidate.is_absolute() || candidate.components().any(|component| {
+        matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir)
+    }) {
+        return Err("Skill package contains an unsafe path.".to_string());
+    }
+    Ok(candidate)
+}
+
+fn validate_package(name: &str, version: u32, files: &HashMap<String, String>, manifest: &serde_json::Value) -> Result<(), String> {
+    if !files.contains_key("SKILL.md") || !files.contains_key("manifest.json") {
+        return Err("Skill package requires SKILL.md and manifest.json.".to_string());
+    }
+    let manifest_name = manifest.get("skillName").and_then(serde_json::Value::as_str);
+    let manifest_version = manifest.get("profileVersion").and_then(serde_json::Value::as_u64);
+    if manifest_name != Some(name) || manifest_version != Some(u64::from(version)) {
+        return Err("Skill manifest does not match the requested package.".to_string());
+    }
+    let checksums = manifest.get("checksums").and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "Skill manifest is missing checksums.".to_string())?;
+    for (path, checksum) in checksums {
+        let expected = checksum.as_str().ok_or_else(|| "Skill manifest contains an invalid checksum.".to_string())?;
+        let content = files.get(path).ok_or_else(|| format!("Skill manifest references missing file: {path}"))?;
+        if package_checksum(content) != expected {
+            return Err(format!("Skill checksum mismatch for {path}."));
+        }
+    }
+    Ok(())
+}
+
+fn read_installed_manifest(target: &PathBuf) -> Result<(), String> {
+    let manifest_path = target.join("manifest.json");
+    let raw = fs::read_to_string(&manifest_path).map_err(|_| "Installed skill has no manifest; refusing overwrite.".to_string())?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw).map_err(|_| "Installed skill manifest is invalid.".to_string())?;
+    let files = collect_package_files(target, &manifest)?;
+    let name = manifest.get("skillName").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let version = manifest.get("profileVersion").and_then(serde_json::Value::as_u64).unwrap_or_default() as u32;
+    validate_package(name, version, &files, &manifest)
+}
+
+fn collect_package_files(root: &PathBuf, manifest: &serde_json::Value) -> Result<HashMap<String, String>, String> {
+    let mut files = HashMap::new();
+    if let Some(checksums) = manifest.get("checksums").and_then(serde_json::Value::as_object) {
+        for path in checksums.keys() {
+            let safe = safe_package_path(path)?;
+            let content = fs::read_to_string(root.join(safe)).map_err(|_| format!("Installed skill is missing {path}."))?;
+            files.insert(path.clone(), content);
+        }
+    }
+    files.insert("manifest.json".to_string(), fs::read_to_string(root.join("manifest.json")).map_err(|_| "Installed skill manifest is unreadable.".to_string())?);
+    Ok(files)
+}
+
+fn publish_skill_package(root: &PathBuf, request: &SkillRequest) -> Result<SkillPublication, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let name = sanitize_skill_name(&request.name);
+    let target = root.join(&name);
+    let mut files = request.files.clone();
+    if files.is_empty() {
+        files.insert("SKILL.md".to_string(), request.markdown.clone());
+    }
+    let manifest = request.manifest.clone().or_else(|| files.get("manifest.json").and_then(|raw| serde_json::from_str(raw).ok()))
+        .ok_or_else(|| "Skill package requires a manifest.".to_string())?;
+    files.insert("manifest.json".to_string(), serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?);
+    for path in files.keys() { safe_package_path(path)?; }
+    validate_package(&name, request.version, &files, &manifest)?;
+
+    let status = if target.exists() { read_installed_manifest(&target)?; "pending-update" } else { "installed" };
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_millis();
+    let temp = root.join(format!(".{name}.tmp-{stamp}"));
+    fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
+    for (path, content) in &files {
+        let destination = temp.join(safe_package_path(path)?);
+        if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
+        fs::write(destination, content).map_err(|error| error.to_string())?;
+    }
+    let mut backup_path = None;
+    if target.exists() {
+        let backup_root = root.join("backups");
+        fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
+        let backup = backup_root.join(format!("{name}-v{}-{stamp}", request.version));
+        fs::rename(&target, &backup).map_err(|error| error.to_string())?;
+        backup_path = Some(backup.to_string_lossy().to_string());
+    }
+    if let Err(error) = fs::rename(&temp, &target) {
+        if let Some(path) = backup_path.as_deref() { let _ = fs::rename(path, &target); }
+        let _ = fs::remove_dir_all(&temp);
+        return Err(error.to_string());
+    }
+    Ok(SkillPublication { path: target.to_string_lossy().to_string(), backup_path, version: request.version, status: status.to_string() })
+}
+
 #[tauri::command]
 fn publish_voice_skill(
     app: tauri::AppHandle,
     request: SkillRequest,
 ) -> Result<SkillPublication, String> {
-    let name = sanitize_skill_name(&request.name);
-    let root = skill_root(&app)?;
-    let skill_path = root.join(&name).join("SKILL.md");
-    let mut backup_path = None;
+    publish_skill_package(&skill_root(&app)?, &request)
+}
 
-    if skill_path.exists() {
-        let backup_root = root.join("backups");
-        fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| error.to_string())?
-            .as_millis();
-        let backup = backup_root.join(format!("{name}-v{}-{stamp}.md", request.version));
-        fs::copy(&skill_path, &backup).map_err(|error| error.to_string())?;
-        backup_path = Some(backup.to_string_lossy().to_string());
+fn restore_skill_package(root: &PathBuf, skill_path: PathBuf, backup_path: Option<PathBuf>) -> Result<SkillPublication, String> {
+    if !skill_path.starts_with(root) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
+    if let Some(backup_path) = backup_path {
+        if !backup_path.starts_with(root.join("backups")) || !backup_path.exists() { return Err("The selected skill backup does not exist.".to_string()); }
+        if skill_path.exists() { fs::remove_dir_all(&skill_path).map_err(|error| error.to_string())?; }
+        fs::rename(&backup_path, &skill_path).map_err(|error| error.to_string())?;
+        return Ok(SkillPublication { path: skill_path.to_string_lossy().to_string(), backup_path: None, version: 0, status: "installed".into() });
     }
-
-    fs::create_dir_all(skill_path.parent().ok_or("Invalid skill path.")?)
-        .map_err(|error| error.to_string())?;
-    fs::write(&skill_path, request.markdown).map_err(|error| {
-        if let Some(path) = backup_path.as_deref() {
-            let _ = fs::copy(path, &skill_path);
-        }
-        error.to_string()
-    })?;
-
-    Ok(SkillPublication {
-        path: skill_path.to_string_lossy().to_string(),
-        backup_path,
-        version: request.version,
-    })
+    if skill_path.exists() { fs::remove_dir_all(&skill_path).map_err(|error| error.to_string())?; }
+    Ok(SkillPublication { path: skill_path.to_string_lossy().to_string(), backup_path: None, version: 0, status: "needs-reload".into() })
 }
 
 #[tauri::command]
@@ -800,31 +889,7 @@ fn restore_voice_skill(
     } else {
         root.join(request.path)
     };
-    if !skill_path.starts_with(&root) {
-        return Err("Skill restore path is outside the My Voice skill folder.".to_string());
-    }
-
-    if let Some(backup) = request.backup_path.as_deref() {
-        let backup_path = PathBuf::from(backup);
-        if !backup_path.exists() {
-            return Err("The selected skill backup does not exist.".to_string());
-        }
-        fs::copy(&backup_path, &skill_path).map_err(|error| error.to_string())?;
-        return Ok(SkillPublication {
-            path: skill_path.to_string_lossy().to_string(),
-            backup_path: None,
-            version: 0,
-        });
-    }
-
-    if skill_path.exists() {
-        fs::remove_file(&skill_path).map_err(|error| error.to_string())?;
-    }
-    Ok(SkillPublication {
-        path: skill_path.to_string_lossy().to_string(),
-        backup_path: None,
-        version: 0,
-    })
+    restore_skill_package(&root, skill_path, request.backup_path.map(PathBuf::from))
 }
 
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -1112,5 +1177,46 @@ mod tests {
             .expect("fake login status runs");
         let status = codex_connection_from_output(&output);
         assert!(status.authenticated);
+    }
+
+    fn package_fixture(root: &PathBuf) -> SkillRequest {
+        let content = "# My Voice\n";
+        let checksum = package_checksum(content);
+        let manifest = serde_json::json!({"skillName":"my-voice","profileVersion":1,"areaIds":[],"generatedAt":"2026-01-01T00:00:00Z","checksums":{"SKILL.md":checksum}});
+        SkillRequest { name: "my-voice".into(), version: 1, markdown: content.into(), files: HashMap::from([("SKILL.md".into(), content.into())]), manifest: Some(manifest) }
+    }
+
+    #[test]
+    fn package_publish_installs_updates_and_restores_from_backup() {
+        let root = temp_codex_file("skills-root");
+        fs::create_dir_all(&root).unwrap();
+        let first = publish_skill_package(&root, &package_fixture(&root)).unwrap();
+        assert_eq!(first.status, "installed");
+        let mut update = package_fixture(&root);
+        update.version = 2;
+        let mut manifest = update.manifest.clone().unwrap();
+        manifest["profileVersion"] = serde_json::json!(2);
+        update.manifest = Some(manifest);
+        let second = publish_skill_package(&root, &update).unwrap();
+        assert_eq!(second.status, "pending-update");
+        assert!(second.backup_path.is_some());
+        let restored = restore_skill_package(&root, PathBuf::from(&second.path), second.backup_path.as_deref().map(PathBuf::from)).unwrap();
+        assert_eq!(restored.status, "installed");
+        assert!(fs::read_to_string(PathBuf::from(&restored.path).join("SKILL.md")).unwrap().contains("My Voice"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn package_publish_rejects_external_edits_and_traversal() {
+        let root = temp_codex_file("skills-root-external");
+        fs::create_dir_all(&root).unwrap();
+        let request = package_fixture(&root);
+        let first = publish_skill_package(&root, &request).unwrap();
+        fs::write(PathBuf::from(&first.path).join("SKILL.md"), "tampered").unwrap();
+        assert!(publish_skill_package(&root, &request).unwrap_err().contains("checksum"));
+        let mut unsafe_request = package_fixture(&root);
+        unsafe_request.files.insert("../escape.md".into(), "x".into());
+        assert!(publish_skill_package(&root, &unsafe_request).unwrap_err().contains("unsafe path"));
+        let _ = fs::remove_dir_all(root);
     }
 }
