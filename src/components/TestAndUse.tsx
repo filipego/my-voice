@@ -103,7 +103,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
     if (!publication) return;
     setStatus("Verifying published selection...");
     try {
-      const result = await verifyVoiceSkill(publication.path, areaId, state.profile.currentVersion);
+      const result = await verifyVoiceSkill(publication.path, areaId, compiled.manifest.profileVersion);
       setVerification(result.detail);
       setStatus(result.verified ? "Published selection verified." : "Published selection mismatch.");
     } catch (error) {
