@@ -122,15 +122,16 @@ impl Database {
 
     pub fn load_state(&self) -> Result<AppState, String> {
         let connection = self.lock();
-        let exists: bool = connection
+        let stored_version: Option<u32> = connection
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM voice_state WHERE id = 1)",
+                "SELECT storage_version FROM voice_state WHERE id = 1",
                 [],
                 |row| row.get(0),
             )
+            .optional()
             .map_err(|error| error.to_string())?;
 
-        if !exists {
+        let Some(stored_version) = stored_version else {
             return Ok(AppState {
                 profile: serde_json::json!({
                     "rules": [],
@@ -139,6 +140,12 @@ impl Database {
                 }),
                 sources: serde_json::json!([]),
             });
+        };
+
+        if stored_version != 1 {
+            return Err(format!(
+                "unsupported storage version: {stored_version}"
+            ));
         }
 
         let raw: String = connection

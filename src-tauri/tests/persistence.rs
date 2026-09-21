@@ -49,14 +49,7 @@ fn unsupported_storage_version_cannot_be_loaded_or_overwritten() {
     let database = Database::open(&path).expect("database opens");
     drop(database);
 
-    let original_state = serde_json::json!({
-        "profile": {"voiceName": "Future Voice"},
-        "sources": [{"id": "future-source"}]
-    });
-    let wrapped = serde_json::json!({
-        "storageVersion": 2,
-        "state": original_state
-    });
+    let wrapped = serde_json::json!({"futurePayload": "requires a newer schema"});
     let connection = rusqlite::Connection::open(&path).expect("raw database opens");
     connection
         .execute(
@@ -67,13 +60,19 @@ fn unsupported_storage_version_cannot_be_loaded_or_overwritten() {
     drop(connection);
 
     let database = Database::open(&path).expect("database reopens");
-    assert!(database.load_state().is_err());
-    assert!(database
+    assert_eq!(
+        database.load_state().expect_err("future version must reject"),
+        "unsupported storage version: 2"
+    );
+    assert_eq!(
+        database
         .save_state(AppState {
             profile: serde_json::json!({"voiceName": "Current Voice"}),
             sources: serde_json::json!([]),
         })
-        .is_err());
+        .expect_err("future version must not be overwritten"),
+        "unsupported storage version: 2"
+    );
     drop(database);
 
     let connection = rusqlite::Connection::open(&path).expect("raw database reopens");

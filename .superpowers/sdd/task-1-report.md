@@ -46,3 +46,9 @@
 ### Concerns
 
 - The normalized boundary still treats persisted rule/version array entries as domain values after checking their array shape; deeper per-entry schema validation is outside this focused Task 1 fix.
+
+## Review resolution: reject incompatible future payloads
+
+- `src-tauri/src/lib.rs` now reads the SQL `storage_version` column before deserializing the stored JSON, so an incompatible future payload still returns `unsupported storage version: 2`.
+- `src-tauri/tests/persistence.rs` seeds version 2 with a payload that omits the current schema fields, asserts both load and save reject with the explicit version error, and verifies the original bytes and version remain unchanged.
+- Validation: `cargo test --manifest-path src-tauri/Cargo.toml --test persistence` (3 passed), `npm run typecheck` (passed), and `npm test -- tests/storage.test.ts` (6 passed).
