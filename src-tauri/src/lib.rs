@@ -55,6 +55,26 @@ fn codex_jobs() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     CODEX_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn register_codex_job(job_id: &str) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    codex_jobs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(job_id.to_string(), flag.clone());
+    flag
+}
+
+fn remove_codex_job(job_id: &str) {
+    codex_jobs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(job_id);
+}
+
+fn job_can_start(cancel_flag: &AtomicBool) -> bool {
+    !cancel_flag.load(Ordering::Acquire)
+}
+
 fn build_codex_args(model: &str, effort: &str) -> Vec<String> {
     vec![
         "exec".into(),
@@ -289,6 +309,32 @@ fn supervise_child(
     }
 }
 
+fn deliver_prompt_and_supervise(
+    mut child: Child,
+    prompt: String,
+    cancel_flag: Arc<AtomicBool>,
+    deadline: Instant,
+) -> Result<(), String> {
+    let (writer_tx, writer_rx) = std::sync::mpsc::sync_channel(1);
+    if let Some(mut stdin) = child.stdin.take() {
+        let prompt_bytes = prompt.into_bytes();
+        std::thread::spawn(move || {
+            let result = stdin
+                .write_all(&prompt_bytes)
+                .map_err(|error| error.to_string());
+            let _ = writer_tx.send(result);
+        });
+    } else {
+        let _ = writer_tx.send(Ok(()));
+    }
+    supervise_child(child, cancel_flag, deadline)?;
+    match writer_rx.recv_timeout(Duration::from_millis(250)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(format!("Could not send the analysis prompt: {error}")),
+        Err(_) => Err("Could not send the analysis prompt before the process exited.".to_string()),
+    }
+}
+
 #[tauri::command]
 fn run_codex_analysis_blocking(
     text: String,
@@ -297,6 +343,7 @@ fn run_codex_analysis_blocking(
     effort: String,
     timeout_ms: u64,
     job_id: String,
+    cancel_flag: Arc<AtomicBool>,
 ) -> Result<Vec<VoiceProposal>, String> {
     let job_options = CodexJobOptions {
         model,
@@ -318,15 +365,22 @@ fn run_codex_analysis_blocking(
     fs::write(&schema_path, r#"{"type":"array","items":{"type":"object","properties":{"instruction":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"scope":{"type":"string"}},"required":["instruction"],"additionalProperties":false}}"#)
         .map_err(|error| error.to_string())?;
 
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    codex_jobs()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(job_id.clone(), cancel_flag.clone());
+    if !job_can_start(&cancel_flag) {
+        remove_codex_job(&job_id);
+        let _ = fs::remove_file(&schema_path);
+        let _ = fs::remove_file(&output_path);
+        return Err("Codex analysis canceled.".to_string());
+    }
     let mut args = build_codex_args(&job_options.model, &job_options.effort);
     args[9] = schema_path.to_string_lossy().to_string();
     args[11] = output_path.to_string_lossy().to_string();
-    let mut child = match Command::new("codex")
+    if !job_can_start(&cancel_flag) {
+        remove_codex_job(&job_id);
+        let _ = fs::remove_file(&schema_path);
+        let _ = fs::remove_file(&output_path);
+        return Err("Codex analysis canceled.".to_string());
+    }
+    let child = match Command::new("codex")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -335,36 +389,16 @@ fn run_codex_analysis_blocking(
     {
         Ok(child) => child,
         Err(error) => {
-            codex_jobs()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&job_id);
+            remove_codex_job(&job_id);
             let _ = fs::remove_file(&schema_path);
             let _ = fs::remove_file(&output_path);
             return Err(format!("Could not start Codex: {error}"));
         }
     };
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(error) = stdin.write_all(prompt.as_bytes()) {
-            let _ = child.kill();
-            let _ = child.wait();
-            codex_jobs()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&job_id);
-            let _ = fs::remove_file(&schema_path);
-            let _ = fs::remove_file(&output_path);
-            return Err(format!("Could not send the analysis prompt: {error}"));
-        }
-    }
-
     let deadline = Instant::now() + Duration::from_millis(job_options.timeout_ms.clamp(1, 600_000));
-    if let Err(error) = supervise_child(child, cancel_flag, deadline) {
-        codex_jobs()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&job_id);
+    if let Err(error) = deliver_prompt_and_supervise(child, prompt, cancel_flag, deadline) {
+        remove_codex_job(&job_id);
         let _ = fs::remove_file(&schema_path);
         let _ = fs::remove_file(&output_path);
         return Err(error);
@@ -373,20 +407,14 @@ fn run_codex_analysis_blocking(
     let raw = match fs::read_to_string(&output_path) {
         Ok(raw) => raw,
         Err(error) => {
-            codex_jobs()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&job_id);
+            remove_codex_job(&job_id);
             let _ = fs::remove_file(&schema_path);
             let _ = fs::remove_file(&output_path);
             return Err(format!("Could not read the Codex result: {error}"));
         }
     };
     let result = parse_codex_output(&raw, max_rules as usize);
-    codex_jobs()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&job_id);
+    remove_codex_job(&job_id);
     let _ = fs::remove_file(&schema_path);
     let _ = fs::remove_file(&output_path);
     result
@@ -401,8 +429,17 @@ async fn run_codex_analysis(
     timeout_ms: u64,
     job_id: String,
 ) -> Result<Vec<VoiceProposal>, String> {
+    let cancel_flag = register_codex_job(&job_id);
     tauri::async_runtime::spawn_blocking(move || {
-        run_codex_analysis_blocking(text, max_rules, model, effort, timeout_ms, job_id)
+        run_codex_analysis_blocking(
+            text,
+            max_rules,
+            model,
+            effort,
+            timeout_ms,
+            job_id,
+            cancel_flag,
+        )
     })
     .await
     .map_err(|error| format!("Codex worker failed: {error}"))?
@@ -627,6 +664,52 @@ mod tests {
             "Codex analysis canceled."
         );
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn cancellation_before_worker_release_prevents_process_launch() {
+        let id = "gated-cancel";
+        let flag = register_codex_job(id);
+        flag.store(true, Ordering::Relaxed);
+        let launched = Arc::new(AtomicBool::new(false));
+        let launched_for_worker = launched.clone();
+        let worker_flag = flag.clone();
+        let worker = std::thread::spawn(move || {
+            if !job_can_start(&worker_flag) {
+                return;
+            }
+            launched_for_worker.store(true, Ordering::Relaxed);
+            let _ = Command::new("sh").args(["-c", "true"]).status();
+        });
+        worker.join().expect("gated worker joins");
+        assert!(!launched.load(Ordering::Relaxed));
+        remove_codex_job(id);
+    }
+
+    #[test]
+    fn blocked_prompt_delivery_is_terminated_and_reaped_on_cancel() {
+        let child = Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("fake non-reading process starts");
+        let flag = Arc::new(AtomicBool::new(false));
+        let worker_flag = flag.clone();
+        let prompt = "é".repeat(24_000);
+        let worker = std::thread::spawn(move || {
+            deliver_prompt_and_supervise(
+                child,
+                prompt,
+                worker_flag,
+                Instant::now() + Duration::from_secs(10),
+            )
+        });
+        std::thread::sleep(Duration::from_millis(40));
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            worker.join().expect("prompt worker joins").unwrap_err(),
+            "Codex analysis canceled."
+        );
     }
 
     #[test]
