@@ -1,6 +1,7 @@
 import type { Profile } from "./profileEngine";
 import { initialProfile, publishProfile } from "./profileEngine";
 import type { WritingSource } from "./sourceImport";
+import type { CorrectionRecord } from "./correctionEngine";
 
 interface TauriInternals {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -9,6 +10,7 @@ interface TauriInternals {
 export interface AppState {
   profile: Profile;
   sources: WritingSource[];
+  corrections?: CorrectionRecord[];
 }
 
 export interface SkillPublication {
@@ -38,6 +40,7 @@ export function normalizeAppState(input: unknown): AppState {
   const candidate = isRecord(input) ? input : {};
   const rawProfile = isRecord(candidate.profile) ? candidate.profile : {};
   const sources = Array.isArray(candidate.sources) ? candidate.sources : [];
+  const corrections = Array.isArray(candidate.corrections) ? candidate.corrections : undefined;
 
   if (
     Array.isArray(rawProfile.rules) &&
@@ -52,6 +55,7 @@ export function normalizeAppState(input: unknown): AppState {
         currentVersion: rawProfile.currentVersion,
       } as Profile,
       sources,
+      ...(corrections ? { corrections } : {}),
     };
   }
 
@@ -66,6 +70,7 @@ export function normalizeAppState(input: unknown): AppState {
         : initialProfile.currentVersion,
     },
     sources,
+    ...(corrections ? { corrections } : {}),
   };
 }
 

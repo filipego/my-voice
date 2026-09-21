@@ -25,7 +25,7 @@ function splitSentences(input: string): Sentence[] {
 export interface SentenceChange {
   before: string;
   after: string;
-  kind: "style" | "audience" | "formatting" | "spelling" | "factual";
+  kind: "style" | "audience" | "formatting" | "spelling" | "factual" | "structural";
 }
 
 const audienceWords = /\b(i|me|my)\b/gi;
@@ -54,6 +54,14 @@ function isSpellingChange(before: string, after: string): boolean {
   return beforeCompact === afterCompact;
 }
 
+function isFactualChange(before: string, after: string): boolean {
+  const numbersBefore = before.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
+  const numbersAfter = after.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
+  if (numbersBefore.join("|") !== numbersAfter.join("|")) return true;
+  const days = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+  return days.test(before) && days.test(after) && normalizeForCompare(before) !== normalizeForCompare(after);
+}
+
 export function classifyChanges(before: string, after: string): SentenceChange[] {
   const oldSentences = splitSentences(before).map((sentence) => sentence.text.trim());
   const newSentences = splitSentences(after).map((sentence) => sentence.text.trim());
@@ -75,6 +83,11 @@ export function classifyChanges(before: string, after: string): SentenceChange[]
       continue;
     }
 
+    if (isFactualChange(oldText, newText)) {
+      changes.push({ before: oldText, after: newText, kind: "factual" });
+      continue;
+    }
+
     changes.push({ before: oldText, after: newText, kind: "style" });
 
     audienceWords.lastIndex = 0;
@@ -84,6 +97,10 @@ export function classifyChanges(before: string, after: string): SentenceChange[]
     if (beforeHasAudience !== afterHasAudience) {
       changes.push({ before: oldText, after: newText, kind: "audience" });
     }
+  }
+
+  if (oldSentences.length !== newSentences.length) {
+    changes.push({ before, after, kind: "structural" });
   }
 
   return changes;

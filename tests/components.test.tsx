@@ -210,12 +210,20 @@ describe("Teach correction actions", () => {
     );
     expect(setState.mock.calls[1][0].profile.rules[2].scope).toBe("email");
 
-    fireEvent.click(
-      within(proposalItems[1]).getByRole("button", {
-        name: "Wrong interpretation",
-      }),
-    );
-    expect(setState).toHaveBeenCalledTimes(2);
+    document.body.innerHTML = "";
+    const rejectedSetState = vi.fn();
+    render(<TeachMyVoice state={appState()} setState={rejectedSetState} />);
+    fireEvent.change(screen.getByLabelText("AI draft"), {
+      target: { value: "I am writing to ask whether we can meet." },
+    });
+    fireEvent.change(screen.getByLabelText("Your final"), {
+      target: { value: "Can we meet?" },
+    });
+    const rejectedItems = screen.getAllByRole("listitem");
+    fireEvent.click(within(rejectedItems[0]).getByRole("button", { name: "Wrong interpretation" }));
+    expect(rejectedSetState).toHaveBeenCalledTimes(1);
+    expect(rejectedSetState.mock.calls[0][0].profile.rules).toHaveLength(2);
+    expect(rejectedSetState.mock.calls[0][0].corrections[0].decisions[0].decision).toBe("wrong-interpretation");
   });
 });
 

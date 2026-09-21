@@ -4,6 +4,7 @@ import type { AppState } from "../core/storage";
 import { classifyChanges, proposeCorrectionRules } from "../core/diffEngine";
 import { proposeRule } from "../core/profileEngine";
 import type { RuleScope } from "../core/profileEngine";
+import { createCorrectionRecord, decideCorrection, type CorrectionDecision, type CorrectionRecord } from "../core/correctionEngine";
 
 interface Props {
   state: AppState;
@@ -21,6 +22,9 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   const [codexStatus, setCodexStatus] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scope, setScope] = useState<"core" | "email" | "essay" | "plan" | "other">("email");
+  const [task, setTask] = useState("");
+  const [audience, setAudience] = useState("");
+  const [activeRecord, setActiveRecord] = useState<CorrectionRecord | null>(null);
   const changes = before && after ? classifyChanges(before, after) : [];
   const proposals = proposeCorrectionRules(changes, scope);
   const approvedText = useMemo(
@@ -34,21 +38,27 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
     [state.sources],
   );
 
-  function remember(index: number, action: "remember" | "context-only") {
-    const proposal = proposals[index];
-    const isAudience = action === "context-only";
-    const instruction = isAudience
-      ? proposal
-      : proposal.replace(" context,", " context:");
-    setState({
-      ...state,
-      profile: proposeRule(state.profile, {
-        instruction,
-        evidence: [before, after],
-        scope,
-        origin: "correction-pair",
-      }),
-    });
+  function decide(index: number, action: CorrectionDecision) {
+    const record = activeRecord && activeRecord.generatedDraft === before && activeRecord.finalRevision === after
+      ? activeRecord
+      : createCorrectionRecord({
+        task: task.trim() || "correction",
+        audience: audience.trim() || "unspecified audience",
+        areaId: scope,
+        profileVersion: state.profile.currentVersion,
+        generatedDraft: before,
+        finalRevision: after,
+      });
+    const proposal = record.proposals[index] ?? {
+      id: `proposal_fallback_${index}`,
+      instruction: proposals[index],
+      editIds: [],
+    };
+    const normalized = record.proposals[index] ? record : { ...record, proposals: [...record.proposals, proposal] };
+    const result = decideCorrection(state.profile, normalized, index, action);
+    setActiveRecord(result.record);
+    const corrections = [...(state.corrections ?? []).filter((item) => item.id !== result.record.id), result.record];
+    setState({ ...state, profile: result.profile, corrections });
   }
 
   function addCodexProposals() {
@@ -153,6 +163,10 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
           <option value="other">Other</option>
         </select>
       </label>
+      <div className="teach-grid">
+        <label>Task<input value={task} onChange={(event) => setTask(event.target.value)} /></label>
+        <label>Audience<input value={audience} onChange={(event) => setAudience(event.target.value)} /></label>
+      </div>
 
       <h2>Proposed lessons</h2>
       {changes.length === 0 && <p className="empty">No changes detected yet.</p>}
@@ -161,15 +175,16 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
           <li key={proposal}>
             <p>{proposal}</p>
             <div className="action-row">
-              <button type="button" onClick={() => remember(index, "remember")}>Remember this</button>
+              <button type="button" onClick={() => decide(index, "remember")}>Remember this</button>
               <button
                 type="button"
                 className="chip"
-                onClick={() => remember(index, "context-only")}
+                onClick={() => decide(index, "context-only")}
               >
                 Only in this context
               </button>
-              <button type="button" className="chip danger" disabled>Wrong interpretation</button>
+              <button type="button" className="chip" onClick={() => decide(index, "just-this-time")}>Just this time</button>
+              <button type="button" className="chip danger" onClick={() => decide(index, "wrong-interpretation")}>Wrong interpretation</button>
             </div>
           </li>
         ))}
