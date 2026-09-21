@@ -416,12 +416,7 @@ fn deliver_prompt_and_supervise(
     if let Some(writer) = writer {
         let _ = writer.join();
     }
-    supervision?;
-    match writer_rx.recv_timeout(Duration::from_millis(250)) {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => Err(format!("Could not send the analysis prompt: {error}")),
-        Err(_) => Err("Could not send the analysis prompt before the process exited.".to_string()),
-    }
+    supervision
 }
 
 #[tauri::command]
@@ -906,6 +901,28 @@ mod tests {
             "early launcher descendant should be terminated"
         );
         let _ = fs::remove_file(pid_path);
+    }
+
+    #[test]
+    fn successful_prompt_delivery_returns_ok_after_writer_and_child_finish() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "cat >/dev/null"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("stdin consumer starts");
+        let result = deliver_prompt_and_supervise(
+            child,
+            "prompt".to_string(),
+            Arc::new(AtomicBool::new(false)),
+            Instant::now() + Duration::from_secs(2),
+        );
+        assert!(
+            result.is_ok(),
+            "successful prompt delivery should return Ok: {result:?}"
+        );
     }
 
     #[test]
