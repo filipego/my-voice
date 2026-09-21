@@ -33,12 +33,14 @@ describe("skill compiler", () => {
     const packageResult = compileSkillPackage(profile, { generatedAt: "2026-09-20T00:00:00.000Z" });
     expect(Object.keys(packageResult.files)).toEqual([
       "SKILL.md",
+      "references/anti-slop.md",
       "references/business-email.md",
       "references/essay.md",
       "references/personal-email.md",
       "references/research-notes.md",
       "references/shared-core.md",
       "references/website-copy.md",
+      "THIRD_PARTY_NOTICES.md",
       "manifest.json",
     ]);
     expect(packageResult.files["references/shared-core.md"]).toContain("Use plain language.");
