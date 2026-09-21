@@ -166,10 +166,10 @@ export default function Library({ state, setState }: Props) {
         <button type="button" onClick={addSource} disabled={!draft.trim()}>
           Import
         </button>
-        <button type="button" onClick={() => setDuplicateResult(isDuplicateText(draft, state.sources.map(sourceIdentityText)) ? "Duplicate found. Review metadata before importing." : "No duplicate found.")}>
+        <button type="button" className="button-quiet" onClick={() => setDuplicateResult(isDuplicateText(draft, state.sources.map(sourceIdentityText)) ? "Duplicate found. Review metadata before importing." : "No duplicate found.")}>
           Check duplicate
         </button>
-        <label><input type="checkbox" checked={replaceDuplicate} onChange={(event) => setReplaceDuplicate(event.target.checked)} /> Replace duplicate metadata</label>
+        <label className="check-inline"><input type="checkbox" checked={replaceDuplicate} onChange={(event) => setReplaceDuplicate(event.target.checked)} /> Replace duplicate metadata</label>
       </div>
       {error && <p className="warning" role="alert">{error}</p>}
       {duplicateResult && <p className="status" role="status">{duplicateResult}</p>}

@@ -1,3 +1,5 @@
+mod github_update;
+
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
@@ -960,6 +962,19 @@ fn verify_voice_skill(app: tauri::AppHandle, request: VerifySkillRequest) -> Res
     Ok(SkillVerification { verified, area_id: request.area_id, profile_version: version, detail: if verified { "Published manifest matches the requested area and profile version.".into() } else { "Published manifest does not match the requested area or profile version.".into() } })
 }
 
+#[tauri::command]
+fn check_app_update(app: tauri::AppHandle) -> Result<Option<github_update::AppUpdateOffer>, String> {
+    github_update::check_latest_release(&app.package_info().version.to_string())
+}
+
+#[tauri::command]
+fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
+    let version = app.package_info().version.to_string();
+    github_update::install_latest_release(&version)?;
+    app.exit(0);
+    Ok(())
+}
+
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let path = app_database_path(&handle)?;
@@ -990,7 +1005,9 @@ pub fn run_app() {
             check_codex_connection,
             publish_voice_skill,
             restore_voice_skill,
-            verify_voice_skill
+            verify_voice_skill,
+            check_app_update,
+            install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("failed to run My Voice");

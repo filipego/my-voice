@@ -17,7 +17,7 @@ import {
   isMissingPublishedRelease,
   type AppUpdateStatus,
 } from "./core/appUpdater";
-import type { Update } from "@tauri-apps/plugin-updater";
+import type { AppUpdateOffer } from "./core/appUpdater";
 
 type Tab = "library" | "profile" | "teach" | "test";
 
@@ -31,7 +31,7 @@ export default function App() {
   const [analysisController, setAnalysisController] = useState(() => new AbortController());
   const [pendingCorrectionPair, setPendingCorrectionPair] = useState<CorrectionPairTransfer | null>(null);
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>({ kind: "idle" });
-  const pendingUpdateRef = useRef<Update | null>(null);
+  const pendingUpdateRef = useRef<AppUpdateOffer | null>(null);
   const updateCheckInFlightRef = useRef(false);
   const tabs: { id: Tab; label: string }[] = [
     { id: "library", label: "Library" },
@@ -54,7 +54,7 @@ export default function App() {
       const update = await findAppUpdate();
       pendingUpdateRef.current = update;
       setUpdateStatus(update
-        ? { kind: "available", version: update.version, notes: update.body }
+        ? { kind: "available", version: update.version }
         : { kind: "up-to-date" });
     } catch (error: unknown) {
       pendingUpdateRef.current = null;
@@ -74,25 +74,9 @@ export default function App() {
       await checkForAppUpdates();
       return;
     }
-    let downloadedBytes = 0;
-    setUpdateStatus({ kind: "installing", version: update.version, downloadedBytes });
+    setUpdateStatus({ kind: "installing", version: update.version, downloadedBytes: 0 });
     try {
-      await installAppUpdate(update, (event) => {
-        if (event.event === "Started") {
-          downloadedBytes = 0;
-          setUpdateStatus({
-            kind: "installing",
-            version: update.version,
-            downloadedBytes,
-            contentLength: event.data.contentLength,
-          });
-        } else if (event.event === "Progress") {
-          downloadedBytes += event.data.chunkLength;
-          setUpdateStatus((current) => current.kind === "installing"
-            ? { ...current, downloadedBytes }
-            : current);
-        }
-      });
+      await installAppUpdate();
     } catch (error: unknown) {
       setUpdateStatus({ kind: "error", message: describeUpdateError(error) });
     }

@@ -113,14 +113,16 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   }
 
   return (
-    <section className="panel" aria-labelledby="test-heading">
-      <h2 id="test-heading">Test & Use</h2>
+    <section className="panel" aria-label="Test & Use">
       <div className="test-grid test-editor-grid">
-        <label className="field field-large">
+        <label>
           Brief
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={8} placeholder="What are you writing?" />
         </label>
-        <pre className="skill-preview" aria-label="Compiled skill">{compiled.files["SKILL.md"]}</pre>
+        <div className="compiled-field">
+          <span>Compiled skill</span>
+          <pre className="skill-preview" aria-label="Compiled skill">{compiled.files["SKILL.md"]}</pre>
+        </div>
       </div>
       <div className="form-grid test-context-grid">
         <label>Audience<input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Who is this for?" /></label>
