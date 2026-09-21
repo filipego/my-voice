@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AppState } from "../core/storage";
-import { createSource, isDuplicateText } from "../core/sourceImport";
+import { createSource, importWritingFile, isDuplicateText, type ImportPreview } from "../core/sourceImport";
 
 interface Props {
   state: AppState;
@@ -13,22 +13,60 @@ export default function Library({ state, setState }: Props) {
   const [format, setFormat] = useState<"email" | "essay" | "plan" | "other">("other");
   const [authorship, setAuthorship] = useState<"original" | "revised" | "ai-assisted">("original");
   const [error, setError] = useState<string | null>(null);
+  const [duplicateResult, setDuplicateResult] = useState<string | null>(null);
+  const [replaceDuplicate, setReplaceDuplicate] = useState(false);
+  const [voiceArea, setVoiceArea] = useState("general guidance");
+  const [filePreview, setFilePreview] = useState<ImportPreview | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   function addSource() {
     try {
       const source = createSource(draft, { title, format, authorship });
-      if (state.sources.some((item) => item.hash === source.hash)) {
+      if (state.sources.some((item) => item.hash === source.hash) && !replaceDuplicate) {
         setError("This exact source has already been imported.");
         return;
       }
-      setState({ ...state, sources: [source, ...state.sources] });
+      const nextSource = { ...source, voiceArea };
+      setState({ ...state, sources: [nextSource, ...state.sources.filter((item) => item.hash !== source.hash || !replaceDuplicate)] });
       setDraft("");
       setTitle("");
       setError(null);
+      setDuplicateResult(null);
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Import failed.");
     }
+  }
+
+  async function chooseFile(file: File | undefined) {
+    if (!file) return;
+    try {
+      setFilePreview(await importWritingFile(file));
+      setTitle(file.name.replace(/\.[^.]+$/, ""));
+      setError(null);
+    } catch (importError) {
+      setFilePreview(null);
+      setError(importError instanceof Error ? importError.message : "File import failed.");
+    }
+  }
+
+  function addFileSource() {
+    if (!filePreview) return;
+    const duplicate = state.sources.some((item) => item.hash === filePreview.hash);
+    if (duplicate && !replaceDuplicate) {
+      setError("This exact source has already been imported. Enable replace metadata to continue.");
+      return;
+    }
+    const source = createSource(filePreview.paragraphs.filter((paragraph) => paragraph.decision === "included").map((paragraph) => paragraph.text).join("\n\n"), { title, format, authorship });
+    const nextSource = {
+      ...source,
+      id: `src_${filePreview.hash.slice(0, 18)}`,
+      hash: filePreview.hash,
+      voiceArea,
+      paragraphDecisions: filePreview.paragraphs,
+    };
+    setState({ ...state, sources: [nextSource, ...state.sources.filter((item) => item.hash !== filePreview.hash || !replaceDuplicate)] });
+    setFilePreview(null);
+    setError(null);
   }
 
   function updateStatus(id: string, status: AppState["sources"][number]["status"]) {
@@ -71,7 +109,27 @@ export default function Library({ state, setState }: Props) {
             <option value="ai-assisted">AI-assisted draft</option>
           </select>
         </label>
+        <label>
+          Voice area
+          <input value={voiceArea} onChange={(event) => setVoiceArea(event.target.value)} placeholder="general guidance" />
+        </label>
       </div>
+      <label>
+        Writing file (.txt, .md, or .docx)
+        <input type="file" accept=".txt,.md,.docx,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void chooseFile(event.target.files?.[0])} />
+      </label>
+      {filePreview && (
+        <div className="source-preview" role="region" aria-label="Import preview">
+          <p><strong>{filePreview.filename}</strong> · {filePreview.paragraphs.length} paragraphs</p>
+          {filePreview.paragraphs.map((paragraph, index) => (
+            <label key={paragraph.id}>
+              <input type="checkbox" checked={paragraph.decision === "included"} onChange={() => setFilePreview({ ...filePreview, paragraphs: filePreview.paragraphs.map((item, itemIndex) => itemIndex === index ? { ...item, decision: item.decision === "included" ? "excluded" : "included" } : item) })} />
+              Include paragraph {index + 1}
+            </label>
+          ))}
+          <button type="button" onClick={addFileSource}>Import file</button>
+        </div>
+      )}
       <label className="textarea-label">
         Text
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={9} />
@@ -80,11 +138,13 @@ export default function Library({ state, setState }: Props) {
         <button type="button" onClick={addSource} disabled={!draft.trim()}>
           Import
         </button>
-        <button type="button" onClick={() => isDuplicateText(draft, state.sources.map((source) => source.paragraphs.join("\n\n")))}>
+        <button type="button" onClick={() => setDuplicateResult(isDuplicateText(draft, state.sources.map((source) => source.paragraphs.join("\n\n"))) ? "Duplicate found. Review metadata before importing." : "No duplicate found.")}>
           Check duplicate
         </button>
+        <label><input type="checkbox" checked={replaceDuplicate} onChange={(event) => setReplaceDuplicate(event.target.checked)} /> Replace duplicate metadata</label>
       </div>
       {error && <p className="warning" role="alert">{error}</p>}
+      {duplicateResult && <p className="status" role="status">{duplicateResult}</p>}
 
       <h2>Sources</h2>
       {state.sources.length === 0 && <p className="empty">No sources yet.</p>}

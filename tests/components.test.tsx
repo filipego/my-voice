@@ -50,6 +50,23 @@ describe("Library source deletion", () => {
   });
 });
 
+describe("Library reviewed imports", () => {
+  it("reports duplicate checks clearly and exposes file review", async () => {
+    const state = appState();
+    const setState = vi.fn();
+    render(<Library state={state} setState={setState} />);
+    fireEvent.change(screen.getByLabelText("Text"), { target: { value: "Write the request in the first line." } });
+    fireEvent.click(screen.getByRole("button", { name: "Check duplicate" }));
+    expect(screen.getByRole("status")).toHaveTextContent(/duplicate found/i);
+
+    const input = screen.getByLabelText(/Writing file/);
+    const file = new File(["A paragraph.\n\nAnother paragraph."], "sample.txt", { type: "text/plain" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(await screen.findByRole("region", { name: "Import preview" })).toBeInTheDocument();
+    expect(screen.getByText(/Include paragraph 1/)).toBeInTheDocument();
+  });
+});
+
 describe("Teach correction actions", () => {
   it("proposes style and audience lessons with distinct outcomes", () => {
     const setState = vi.fn();

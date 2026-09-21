@@ -2,6 +2,24 @@
 export type Authorship = "original" | "revised" | "ai-assisted";
 export type WritingFormat = "email" | "essay" | "plan" | "other";
 export type SourceStatus = "unprocessed" | "approved" | "excluded" | "evaluation";
+export type ParagraphDecision = "included" | "excluded";
+
+export interface ParagraphRecord {
+  id: string;
+  text: string;
+  decision: ParagraphDecision;
+}
+
+export interface ImportPreview {
+  filename: string;
+  type: "txt" | "md" | "docx";
+  size: number;
+  hash: string;
+  paragraphs: ParagraphRecord[];
+  warnings: string[];
+}
+
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 export interface NormalizedSource {
   id: string;
@@ -17,6 +35,8 @@ export interface WritingSource {
   format: WritingFormat;
   status: SourceStatus;
   paragraphs: string[];
+  paragraphDecisions: ParagraphRecord[];
+  voiceArea: string;
   hash: string;
   createdAt: string;
 }
@@ -46,6 +66,44 @@ export function normalizeText(raw: string): NormalizedSource {
   return { id, text, paragraphs, hash };
 }
 
+function paragraphRecords(paragraphs: string[]): ParagraphRecord[] {
+  return paragraphs.map((text, index) => ({
+    id: `p_${fnv1a64(text).slice(0, 14)}_${index + 1}`,
+    text,
+    decision: "included",
+  }));
+}
+
+export async function importWritingFile(file: File): Promise<ImportPreview> {
+  const extension = file.name.toLowerCase().split(".").pop();
+  if (extension !== "txt" && extension !== "md" && extension !== "docx") {
+    throw new Error("Unsupported writing file. Choose a .txt, .md, or .docx file.");
+  }
+  if (file.size > MAX_IMPORT_BYTES) {
+    throw new Error(`Writing file is too large (maximum ${MAX_IMPORT_BYTES} bytes).`);
+  }
+
+  let raw: string;
+  if (extension === "docx") {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    raw = result.value;
+  } else {
+    raw = await file.text();
+  }
+  const normalized = normalizeText(raw);
+  if (!normalized.text) throw new Error("Writing file is empty or contains no readable text.");
+
+  return {
+    filename: file.name,
+    type: extension,
+    size: file.size,
+    hash: normalized.hash,
+    paragraphs: paragraphRecords(normalized.paragraphs),
+    warnings: [],
+  };
+}
+
 export function isDuplicateText(raw: string, seen: string[]): boolean {
   const normalized = normalizeText(raw).text.toLowerCase();
   return seen.some((value) => normalizeText(value).text.toLowerCase() === normalized);
@@ -71,6 +129,8 @@ export function createSource(
     format: metadata.format ?? "other",
     status: "unprocessed",
     paragraphs: normalized.paragraphs,
+    paragraphDecisions: paragraphRecords(normalized.paragraphs),
+    voiceArea: "general guidance",
     hash: normalized.hash,
     createdAt: new Date().toISOString(),
   };
