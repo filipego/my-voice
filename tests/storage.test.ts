@@ -52,6 +52,23 @@ describe("storage", () => {
     await expect(saveState(state())).rejects.toThrow("SQLite unavailable");
     expect(await loadState()).toEqual({ profile: initialProfile, sources: [] });
   });
+
+  it("normalizes persisted profiles with missing rule and version arrays", async () => {
+    vi.unstubAllGlobals();
+    localStorage.setItem(
+      "my-voice-state-v1",
+      JSON.stringify({ profile: { currentVersion: 1 }, sources: [] }),
+    );
+
+    const loaded = await loadState();
+
+    expect(loaded.profile).toEqual({
+      rules: [],
+      versions: [],
+      currentVersion: 1,
+    });
+    expect(loaded.sources).toEqual([]);
+  });
 });
 
 describe("source deletion", () => {

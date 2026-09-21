@@ -25,15 +25,43 @@ function tauriInvoke(): TauriInternals["invoke"] | null {
   return typeof internals?.invoke === "function" ? internals.invoke : null;
 }
 
+export function normalizeAppState(input: unknown): AppState {
+  const candidate = input && typeof input === "object"
+    ? (input as Partial<AppState>)
+    : {};
+  const rawProfile = candidate.profile && typeof candidate.profile === "object"
+    ? candidate.profile
+    : {};
+
+  if (
+    candidate.profile &&
+    Array.isArray(rawProfile.rules) &&
+    Array.isArray(rawProfile.versions) &&
+    typeof rawProfile.currentVersion === "number" &&
+    Array.isArray(candidate.sources)
+  ) {
+    return candidate as AppState;
+  }
+
+  return {
+    profile: {
+      ...initialProfile,
+      ...rawProfile,
+      rules: Array.isArray(rawProfile.rules) ? rawProfile.rules : [],
+      versions: Array.isArray(rawProfile.versions) ? rawProfile.versions : [],
+      currentVersion: typeof rawProfile.currentVersion === "number"
+        ? rawProfile.currentVersion
+        : initialProfile.currentVersion,
+    },
+    sources: Array.isArray(candidate.sources) ? candidate.sources : [],
+  };
+}
+
 function parseState(raw: string): AppState {
   try {
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    return {
-      profile: parsed.profile ?? initialProfile,
-      sources: parsed.sources ?? [],
-    };
+    return normalizeAppState(JSON.parse(raw));
   } catch {
-    return { profile: initialProfile, sources: [] };
+    return normalizeAppState(null);
   }
 }
 
@@ -41,14 +69,14 @@ export async function loadState(): Promise<AppState> {
   const invoke = tauriInvoke();
   if (invoke) {
     try {
-      return (await invoke("load_voice_state")) as AppState;
+      return normalizeAppState(await invoke("load_voice_state"));
     } catch {
-      return { profile: initialProfile, sources: [] };
+      return normalizeAppState(null);
     }
   }
 
   const raw = localStorage.getItem(storageKey);
-  return raw ? parseState(raw) : { profile: initialProfile, sources: [] };
+  return raw ? parseState(raw) : normalizeAppState(null);
 }
 
 export async function saveState(state: AppState): Promise<void> {

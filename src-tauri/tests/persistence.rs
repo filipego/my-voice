@@ -8,7 +8,9 @@ fn database_round_trips_voice_state() {
     let database = Database::open(&path).expect("database opens");
 
     let loaded = database.load_state().expect("initial state loads");
-    assert_eq!(loaded.profile["currentVersion"], 1);
+    assert_eq!(loaded.profile["rules"], serde_json::json!([]));
+    assert_eq!(loaded.profile["versions"], serde_json::json!([]));
+    assert_eq!(loaded.profile["currentVersion"], 0);
     assert_eq!(loaded.sources.as_array().map(Vec::len), Some(0));
 
     let profile = serde_json::json!({"currentVersion": 7});

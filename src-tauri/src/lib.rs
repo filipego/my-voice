@@ -120,7 +120,11 @@ impl Database {
 
         if !exists {
             return Ok(AppState {
-                profile: serde_json::json!({"currentVersion": 1}),
+                profile: serde_json::json!({
+                    "rules": [],
+                    "versions": [],
+                    "currentVersion": 0
+                }),
                 sources: serde_json::json!([]),
             });
         }
