@@ -34,10 +34,16 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
     generatedDraft: before,
     finalRevision: after,
   }) : null, [before, after, task, audience, scope, state.profile.currentVersion]);
+  const persistedRecord = state.corrections?.find((record) =>
+    record.generatedDraft === before && record.finalRevision === after &&
+    record.task === (task.trim() || "correction") &&
+    record.audience === (audience.trim() || "unspecified audience") &&
+    record.areaId === scope,
+  ) ?? null;
   const rejectedProposalIds = new Set(
     (state.corrections ?? [])
       .filter((record) => record.generatedDraft === before && record.finalRevision === after)
-      .flatMap((record) => record.proposals.filter((proposal) => proposal.rejected).map((proposal) => proposal.id)),
+      .flatMap((record) => record.decisions.map((decision) => decision.proposalId)),
   );
   const proposals = (draftRecord?.proposals ?? []).filter((proposal) => !rejectedProposalIds.has(proposal.id));
   const approvedText = useMemo(
@@ -52,9 +58,9 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   );
 
   function decide(proposalId: string, action: CorrectionDecision) {
-    const record = activeRecord && activeRecord.generatedDraft === before && activeRecord.finalRevision === after
+    const record = (activeRecord && activeRecord.generatedDraft === before && activeRecord.finalRevision === after
       ? activeRecord
-      : draftRecord;
+      : persistedRecord) ?? draftRecord;
     if (!record) return;
     const proposalIndex = record.proposals.findIndex((proposal) => proposal.id === proposalId);
     if (proposalIndex < 0) return;

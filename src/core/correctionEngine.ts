@@ -124,7 +124,10 @@ export function decideCorrection(
   };
   if (decision === "remember" || decision === "context-only") {
     const scope: RuleScope = decision === "context-only" ? ruleScopeFor(record.areaId) : "core";
-    const proposed = proposeRule(profile, {
+    const baseline = profile.currentVersion === 0 && profile.versions.length === 0
+      ? publishProfile(profile, "Baseline before correction learning.")
+      : profile;
+    const proposed = proposeRule(baseline, {
       instruction: proposal.instruction,
       evidence: [record.generatedDraft, record.finalRevision],
       scope,
