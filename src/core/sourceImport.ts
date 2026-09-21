@@ -105,8 +105,12 @@ export async function importWritingFile(file: File): Promise<ImportPreview> {
 }
 
 export function isDuplicateText(raw: string, seen: string[]): boolean {
-  const normalized = normalizeText(raw).text.toLowerCase();
-  return seen.some((value) => normalizeText(value).text.toLowerCase() === normalized);
+  const normalized = normalizedDuplicateKey(raw);
+  return seen.some((value) => normalizedDuplicateKey(value) === normalized);
+}
+
+export function normalizedDuplicateKey(raw: string): string {
+  return normalizeText(raw).text.toLocaleLowerCase();
 }
 
 export function createSource(

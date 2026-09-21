@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AppState } from "../core/storage";
-import { createSource, importWritingFile, isDuplicateText, type ImportPreview } from "../core/sourceImport";
+import { createSource, importWritingFile, isDuplicateText, normalizedDuplicateKey, type ImportPreview } from "../core/sourceImport";
 
 interface Props {
   state: AppState;
@@ -17,17 +17,22 @@ export default function Library({ state, setState }: Props) {
   const [replaceDuplicate, setReplaceDuplicate] = useState(false);
   const [voiceArea, setVoiceArea] = useState("general guidance");
   const [filePreview, setFilePreview] = useState<ImportPreview | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const fileRequest = useRef(0);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   function addSource() {
     try {
       const source = createSource(draft, { title, format, authorship });
-      if (state.sources.some((item) => item.hash === source.hash) && !replaceDuplicate) {
+      const duplicate = state.sources.find((item) => normalizedDuplicateKey(item.paragraphs.join("\n\n")) === normalizedDuplicateKey(draft));
+      if (duplicate && !replaceDuplicate) {
         setError("This exact source has already been imported.");
         return;
       }
       const nextSource = { ...source, voiceArea };
-      setState({ ...state, sources: [nextSource, ...state.sources.filter((item) => item.hash !== source.hash || !replaceDuplicate)] });
+      setState(duplicate && replaceDuplicate
+        ? { ...state, sources: state.sources.map((item) => item.id === duplicate.id ? { ...item, title: nextSource.title, authorship: nextSource.authorship, format: nextSource.format, voiceArea: nextSource.voiceArea } : item) }
+        : { ...state, sources: [nextSource, ...state.sources] });
       setDraft("");
       setTitle("");
       setError(null);
@@ -39,24 +44,44 @@ export default function Library({ state, setState }: Props) {
 
   async function chooseFile(file: File | undefined) {
     if (!file) return;
+    const requestId = fileRequest.current + 1;
+    fileRequest.current = requestId;
+    setFilePreview(null);
+    setFileLoading(true);
+    setError(null);
     try {
-      setFilePreview(await importWritingFile(file));
+      const preview = await importWritingFile(file);
+      if (requestId !== fileRequest.current) return;
+      setFilePreview(preview);
       setTitle(file.name.replace(/\.[^.]+$/, ""));
-      setError(null);
     } catch (importError) {
+      if (requestId !== fileRequest.current) return;
       setFilePreview(null);
       setError(importError instanceof Error ? importError.message : "File import failed.");
+    } finally {
+      if (requestId === fileRequest.current) setFileLoading(false);
     }
   }
 
   function addFileSource() {
     if (!filePreview) return;
-    const duplicate = state.sources.some((item) => item.hash === filePreview.hash);
+    const duplicate = state.sources.find((item) => normalizedDuplicateKey(item.paragraphs.join("\n\n")) === normalizedDuplicateKey(filePreview.paragraphs.map((paragraph) => paragraph.text).join("\n\n")));
     if (duplicate && !replaceDuplicate) {
       setError("This exact source has already been imported. Enable replace metadata to continue.");
       return;
     }
-    const source = createSource(filePreview.paragraphs.filter((paragraph) => paragraph.decision === "included").map((paragraph) => paragraph.text).join("\n\n"), { title, format, authorship });
+    const included = filePreview.paragraphs.filter((paragraph) => paragraph.decision === "included");
+    if (included.length === 0) {
+      setError("Include at least one paragraph before importing.");
+      return;
+    }
+    const source = createSource(included.map((paragraph) => paragraph.text).join("\n\n"), { title, format, authorship });
+    if (duplicate && replaceDuplicate) {
+      setState({ ...state, sources: state.sources.map((item) => item.id === duplicate.id ? { ...item, title: title.trim() || item.title, authorship, format, voiceArea } : item) });
+      setFilePreview(null);
+      setError(null);
+      return;
+    }
     const nextSource = {
       ...source,
       id: `src_${filePreview.hash.slice(0, 18)}`,
@@ -64,7 +89,7 @@ export default function Library({ state, setState }: Props) {
       voiceArea,
       paragraphDecisions: filePreview.paragraphs,
     };
-    setState({ ...state, sources: [nextSource, ...state.sources.filter((item) => item.hash !== filePreview.hash || !replaceDuplicate)] });
+    setState({ ...state, sources: [nextSource, ...state.sources] });
     setFilePreview(null);
     setError(null);
   }
@@ -116,15 +141,15 @@ export default function Library({ state, setState }: Props) {
       </div>
       <label>
         Writing file (.txt, .md, or .docx)
-        <input type="file" accept=".txt,.md,.docx,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void chooseFile(event.target.files?.[0])} />
+        <input type="file" disabled={fileLoading} accept=".txt,.md,.docx,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void chooseFile(event.target.files?.[0])} />
       </label>
       {filePreview && (
         <div className="source-preview" role="region" aria-label="Import preview">
           <p><strong>{filePreview.filename}</strong> · {filePreview.paragraphs.length} paragraphs</p>
           {filePreview.paragraphs.map((paragraph, index) => (
             <label key={paragraph.id}>
-              <input type="checkbox" checked={paragraph.decision === "included"} onChange={() => setFilePreview({ ...filePreview, paragraphs: filePreview.paragraphs.map((item, itemIndex) => itemIndex === index ? { ...item, decision: item.decision === "included" ? "excluded" : "included" } : item) })} />
-              Include paragraph {index + 1}
+              <input aria-label={`Include paragraph ${index + 1}`} type="checkbox" checked={paragraph.decision === "included"} onChange={() => setFilePreview({ ...filePreview, paragraphs: filePreview.paragraphs.map((item, itemIndex) => itemIndex === index ? { ...item, decision: item.decision === "included" ? "excluded" : "included" } : item) })} />
+              <span>Include paragraph {index + 1}</span>: <span>{paragraph.text}</span>
             </label>
           ))}
           <button type="button" onClick={addFileSource}>Import file</button>

@@ -6,6 +6,7 @@ import TestAndUse from "../src/components/TestAndUse";
 import type { VoiceProposal } from "../src/core/codexAdapter";
 import { initialProfile, proposeRule, publishProfile } from "../src/core/profileEngine";
 import { createSource } from "../src/core/sourceImport";
+import * as sourceImport from "../src/core/sourceImport";
 import type { AppState } from "../src/core/storage";
 
 afterEach(() => {
@@ -64,6 +65,62 @@ describe("Library reviewed imports", () => {
     fireEvent.change(input, { target: { files: [file] } });
     expect(await screen.findByRole("region", { name: "Import preview" })).toBeInTheDocument();
     expect(screen.getByText(/Include paragraph 1/)).toBeInTheDocument();
+    expect(screen.getByText("A paragraph.")).toBeInTheDocument();
+    expect(screen.getByText("Another paragraph.")).toBeInTheDocument();
+  });
+
+  it("persists an excluded paragraph and rejects an empty selection", async () => {
+    const state = appState();
+    const setState = vi.fn();
+    render(<Library state={{ ...state, sources: [] }} setState={setState} />);
+    const input = screen.getByLabelText(/Writing file/);
+    fireEvent.change(input, { target: { files: [new File(["Keep.\n\nSkip."], "review.txt")] } });
+    await screen.findByRole("region", { name: "Import preview" });
+    fireEvent.click(screen.getByLabelText("Include paragraph 2"));
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    expect(setState).toHaveBeenCalledTimes(1);
+    expect(setState.mock.calls[0][0].sources[0].paragraphs).toEqual(["Keep."]);
+    expect(setState.mock.calls[0][0].sources[0].paragraphDecisions[1].decision).toBe("excluded");
+
+    setState.mockClear();
+    fireEvent.change(input, { target: { files: [new File(["Only."], "empty-selection.txt")] } });
+    await screen.findByRole("region", { name: "Import preview" });
+    fireEvent.click(screen.getByLabelText("Include paragraph 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/include at least one paragraph/i);
+    expect(setState).not.toHaveBeenCalled();
+  });
+
+  it("replaces only permitted metadata for a canonical duplicate", async () => {
+    const original = createSource("Same words.", { title: "Old title" });
+    const state = { ...appState(), sources: [{ ...original, status: "approved" as const, createdAt: "2020-01-01T00:00:00.000Z", paragraphDecisions: [{ ...original.paragraphDecisions[0], decision: "excluded" as const }] }] };
+    const setState = vi.fn();
+    render(<Library state={state} setState={setState} />);
+    fireEvent.click(screen.getByLabelText("Replace duplicate metadata"));
+    fireEvent.change(screen.getByLabelText(/Writing file/), { target: { files: [new File(["SAME WORDS."], "same.txt")] } });
+    await screen.findByRole("region", { name: "Import preview" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    const replaced = setState.mock.calls[0][0].sources[0];
+    expect(replaced.title).toBe("New title");
+    expect(replaced.status).toBe("approved");
+    expect(replaced.createdAt).toBe("2020-01-01T00:00:00.000Z");
+    expect(replaced.paragraphDecisions[0].decision).toBe("excluded");
+  });
+
+  it("ignores stale file extraction results", async () => {
+    const deferred = new Map<string, { resolve: (value: sourceImport.ImportPreview) => void }>();
+    vi.spyOn(sourceImport, "importWritingFile").mockImplementation((file) => new Promise((resolve) => { deferred.set(file.name, { resolve }); }));
+    const setState = vi.fn();
+    render(<Library state={{ ...appState(), sources: [] }} setState={setState} />);
+    const input = screen.getByLabelText(/Writing file/);
+    fireEvent.change(input, { target: { files: [new File(["old"], "old.txt")] } });
+    fireEvent.change(input, { target: { files: [new File(["new"], "new.txt")] } });
+    expect(screen.queryByRole("region", { name: "Import preview" })).not.toBeInTheDocument();
+    deferred.get("new.txt")?.resolve({ filename: "new.txt", type: "txt", size: 3, hash: "new", warnings: [], paragraphs: [{ id: "p_new", text: "Newest.", decision: "included" }] });
+    expect(await screen.findByText("Newest.")).toBeInTheDocument();
+    deferred.get("old.txt")?.resolve({ filename: "old.txt", type: "txt", size: 3, hash: "old", warnings: [], paragraphs: [{ id: "p_old", text: "Oldest.", decision: "included" }] });
+    expect(screen.queryByText("Oldest.")).not.toBeInTheDocument();
   });
 });
 
