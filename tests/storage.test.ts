@@ -121,4 +121,36 @@ describe("source deletion", () => {
     expect(result.profile.rules).toHaveLength(0);
     expect(result.sources).toHaveLength(0);
   });
+
+  it("prunes sequential source deletion and removes the rule only after its last evidence is gone", () => {
+    const sourceA = createSource("Evidence A.", { title: "A" });
+    const sourceB = createSource("Evidence B.", { title: "B" });
+    let profile = proposeRule(initialProfile, {
+      instruction: "Use both examples.",
+      origin: "writing-sample",
+      evidence: [
+        { sourceId: sourceA.id, paragraphId: sourceA.paragraphDecisions[0].id, excerpt: sourceA.paragraphs[0] },
+        { sourceId: sourceB.id, paragraphId: sourceB.paragraphDecisions[0].id, excerpt: sourceB.paragraphs[0] },
+      ],
+      scope: "core",
+    });
+    let result = deleteSourceEvidence({ profile, sources: [sourceA, sourceB] }, sourceA.id);
+    expect(result.profile.rules[0].evidence).toHaveLength(1);
+    expect(result.profile.rules[0].evidence[0]).toMatchObject({ sourceId: sourceB.id });
+    result = deleteSourceEvidence(result, sourceB.id);
+    expect(result.profile.rules).toHaveLength(0);
+  });
+
+  it("snapshots the prior profile before destructive source deletion", () => {
+    const source = createSource("Recover this evidence.", { title: "Recoverable" });
+    const profile = proposeRule(initialProfile, {
+      instruction: "Keep recoverable evidence.",
+      origin: "writing-sample",
+      evidence: [{ sourceId: source.id, paragraphId: source.paragraphDecisions[0].id, excerpt: source.paragraphs[0] }],
+    });
+    const result = deleteSourceEvidence({ profile, sources: [source] }, source.id);
+    expect(result.profile.currentVersion).toBe(1);
+    expect(result.profile.versions[0].rules[0].instruction).toBe("Keep recoverable evidence.");
+    expect(result.profile.rules).toHaveLength(0);
+  });
 });

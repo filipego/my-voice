@@ -1,5 +1,5 @@
 import type { Profile } from "./profileEngine";
-import { initialProfile } from "./profileEngine";
+import { initialProfile, publishProfile } from "./profileEngine";
 import type { WritingSource } from "./sourceImport";
 
 interface TauriInternals {
@@ -146,24 +146,19 @@ export function deleteSourceEvidence(
   const source = state.sources.find((item) => item.id === sourceId);
   if (!source) return state;
 
-  const impactedRuleIds = new Set(
-    state.profile.rules
-      .filter((rule) => {
-        const remainingSourceIds = (rule.sourceIds ?? []).filter((id) => id !== sourceId);
-        const remainingEvidence = rule.evidence.filter((evidence) =>
-          typeof evidence !== "string" ? evidence.sourceId !== sourceId : !source.paragraphs.includes(evidence),
-        );
-        const referencesSource = rule.sourceIds?.includes(sourceId) || rule.evidence.some((evidence) =>
-          typeof evidence !== "string" ? evidence.sourceId === sourceId : source.paragraphs.includes(evidence),
-        );
-        return Boolean(referencesSource && remainingSourceIds.length === 0 && remainingEvidence.length === 0);
-      })
-      .map((rule) => rule.id),
-  );
+  const rules = state.profile.rules.flatMap((rule) => {
+    const sourceIds = (rule.sourceIds ?? []).filter((id) => id !== sourceId);
+    const evidence = rule.evidence.filter((item) => typeof item !== "string" ? item.sourceId !== sourceId : !source.paragraphs.includes(item));
+    const referencesSource = rule.sourceIds?.includes(sourceId) || rule.evidence.some((item) => typeof item !== "string" ? item.sourceId === sourceId : source.paragraphs.includes(item));
+    if (!referencesSource) return [rule];
+    if (sourceIds.length === 0 && evidence.length === 0) return [];
+    return [{ ...rule, sourceIds: sourceIds.length ? sourceIds : undefined, evidence, updatedAt: new Date().toISOString() }];
+  });
+  const versioned = publishProfile(state.profile, `Deleted source ${source.title}.`);
   return {
     profile: {
-      ...state.profile,
-      rules: state.profile.rules.filter((rule) => !impactedRuleIds.has(rule.id)),
+      ...versioned,
+      rules,
     },
     sources: state.sources.filter((item) => item.id !== sourceId),
   };

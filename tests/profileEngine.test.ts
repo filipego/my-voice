@@ -51,4 +51,17 @@ describe("profile engine", () => {
     });
     expect(profile.rules[0].evidence[0]).toEqual({ sourceId: "src_1", paragraphId: "p_1", excerpt: "Lead with the request." });
   });
+
+  it("gives each superseding rule a unique id and only replacement can be edited", () => {
+    let profile = proposeRule(initialProfile, { instruction: "Repeat the point.", origin: "direct-instruction" });
+    const originalId = profile.rules[0].id;
+    profile = supersedeRule(profile, originalId, { instruction: "Repeat the point.", origin: "direct-instruction" });
+    expect(profile.rules[0].id).not.toBe(profile.rules[1].id);
+    const replacementId = profile.rules[1].id;
+    profile = editRule(profile, replacementId, "State the point once.");
+    profile = setRuleState(profile, replacementId, "approved");
+    expect(profile.rules.find((rule) => rule.id === originalId)?.state).toBe("superseded");
+    expect(profile.rules.find((rule) => rule.id === replacementId)?.instruction).toBe("State the point once.");
+    expect(profile.rules.find((rule) => rule.id === replacementId)?.state).toBe("approved");
+  });
 });

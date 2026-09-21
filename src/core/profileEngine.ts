@@ -40,8 +40,12 @@ export const initialProfile: Profile = {
   currentVersion: 0,
 };
 
-function stableId(prefix: string, value: string): string {
-  return `${prefix}_${value.slice(0, 16).replace(/[^a-zA-Z0-9]/g, "")}`;
+function stableId(prefix: string, value: string, existing: Set<string>): string {
+  const base = `${prefix}_${value.slice(0, 16).replace(/[^a-zA-Z0-9]/g, "")}`;
+  let id = base;
+  let suffix = 2;
+  while (existing.has(id)) id = `${base}_${suffix++}`;
+  return id;
 }
 
 function snapshot(profile: Profile, summary: string): ProfileVersion {
@@ -69,7 +73,7 @@ export function proposeRule(
     rules: [
       ...profile.rules,
       {
-        id: stableId("rule", proposal.instruction + proposal.origin + now),
+        id: stableId("rule", proposal.instruction + proposal.origin + now, new Set(profile.rules.map((rule) => rule.id))),
         instruction: proposal.instruction,
         evidence: proposal.evidence ?? [],
         scope: proposal.scope ?? "core",
