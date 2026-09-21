@@ -16,7 +16,7 @@ export function compileSkillPackage(profile: Profile, options: { name?: string; 
   const core = rules.filter((rule) => rule.scope === "core");
   const areas = new Map<string, VoiceRule[]>();
   const areaPaths = new Map<string, string>();
-  for (const rule of rules) if (rule.scope !== "core") { const base = kebab(rule.scope) === "shared-core" ? "shared-core-area" : kebab(rule.scope); let id = areaPaths.get(rule.scope) ?? base; let suffix = 2; while (areas.has(id) && areaPaths.get(rule.scope) !== id) id = `${base}-${suffix++}`; areaPaths.set(rule.scope, id); areas.set(id, [...(areas.get(id) ?? []), rule]); }
+  for (const rule of rules) if (rule.scope !== "core") { const slug = kebab(rule.scope); const base = slug === "shared-core" ? "shared-core-area" : slug === "anti-slop" ? "anti-slop-area" : slug; let id = areaPaths.get(rule.scope) ?? base; let suffix = 2; while (areas.has(id) && areaPaths.get(rule.scope) !== id) id = `${base}-${suffix++}`; areaPaths.set(rule.scope, id); areas.set(id, [...(areas.get(id) ?? []), rule]); }
   const files: Record<string, string> = {};
   const selected = options.selectedAreaId ? (areaPaths.get(options.selectedAreaId) ?? kebab(options.selectedAreaId)) : undefined;
   const links = ["references/shared-core.md", ...(selected && areas.has(selected) ? [`references/${selected}.md`] : [...areas.keys()].sort().map((area) => `references/${area}.md`))];
@@ -25,7 +25,7 @@ export function compileSkillPackage(profile: Profile, options: { name?: string; 
   for (const [area, areaRules] of [...areas.entries()].sort(([a], [b]) => a.localeCompare(b))) files[`references/${area}.md`] = [`# ${area}`, ...areaRules.map((rule) => `- ${rule.state === "locked" ? "[LOCKED] " : ""}${rule.instruction}`), ""].join("\n");
   const exceptions = options.antiSlop?.exceptions ?? {};
   const exceptionLines = Object.entries(exceptions).sort(([a], [b]) => a.localeCompare(b)).flatMap(([area, decisions]) => Object.entries(decisions).sort(([a], [b]) => a.localeCompare(b)).map(([ruleId, decision]) => `- ${area}: ${ruleId} → ${decision}`));
-  files["references/anti-slop.md"] = ["# Anti-slop warnings", "", "These deterministic, attributed warnings are advisory only. Preserve task facts and approved or locked voice rules; never rewrite a fact automatically.", "", "Selected checks: AI vocabulary, common constructions, punctuation cadence, rule-of-three rhythm, and possible invented proof.", "", "Area-scoped decisions:", ...(exceptionLines.length ? exceptionLines : ["- None configured."]), ""].join("\n");
+  files["references/anti-slop.md"] = ["# Anti-slop warnings", "", "These deterministic, attributed warnings are advisory only. Preserve task facts and approved or locked voice rules; never rewrite a fact automatically.", "", "Checks: slop.vocabulary flags generic AI vocabulary (for example leverage, seamless, robust); slop.construction flags not-just/but contrasts; slop.punctuation flags repeated em dashes; slop.rhythm flags rule-of-three cadence; slop.proof flags possible social-proof numbers.", "", "Area-scoped decisions:", ...(exceptionLines.length ? exceptionLines : ["- None configured."]), ""].join("\n");
   files["THIRD_PARTY_NOTICES.md"] = ANTI_SLOP_NOTICE;
   const checksums: Record<string, string> = {}; for (const [path, content] of Object.entries(files)) checksums[path] = syncChecksum(content);
   const manifest: SkillManifest = { skillName: name, profileVersion: version, areaIds: [...areas.keys()].sort(), generatedAt: options.generatedAt ?? new Date().toISOString(), checksums };

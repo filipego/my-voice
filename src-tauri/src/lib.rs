@@ -889,7 +889,8 @@ fn publish_voice_skill(
 }
 
 fn restore_skill_package(root: &PathBuf, skill_path: PathBuf, backup_path: Option<PathBuf>) -> Result<SkillPublication, String> {
-    if !skill_path.starts_with(root) || skill_path == *root || skill_path.parent() != Some(root.as_path()) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
+    if skill_path == *root || skill_path.parent() != Some(root.as_path()) || skill_path.file_name().is_none() || skill_path.components().any(|component| matches!(component, std::path::Component::ParentDir)) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
+    if skill_path.exists() { read_installed_manifest(&skill_path)?; }
     if let Some(backup_path) = backup_path {
         if !backup_path.starts_with(root.join("backups")) || backup_path.parent() != Some(root.join("backups").as_path()) || !backup_path.is_dir() { return Err("The selected skill backup does not exist.".to_string()); }
         let displaced = root.join(format!(".restore-displaced-{}", SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_millis()));
@@ -913,6 +914,7 @@ fn restore_voice_skill(
     let root = skill_root(&app)?;
     let requested = PathBuf::from(&request.path);
     let skill_path = if requested.is_absolute() {
+        if requested.components().any(|component| matches!(component, std::path::Component::ParentDir)) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
         requested
     } else {
         if safe_package_path(&request.path).is_err() { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
