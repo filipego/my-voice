@@ -7,6 +7,12 @@ interface Props {
   setState: (value: AppState) => void;
 }
 
+function sourceIdentityText(source: AppState["sources"][number]): string {
+  return source.paragraphDecisions?.length
+    ? source.paragraphDecisions.map((paragraph) => paragraph.text).join("\n\n")
+    : source.paragraphs.join("\n\n");
+}
+
 export default function Library({ state, setState }: Props) {
   const [draft, setDraft] = useState("");
   const [title, setTitle] = useState("");
@@ -24,7 +30,7 @@ export default function Library({ state, setState }: Props) {
   function addSource() {
     try {
       const source = createSource(draft, { title, format, authorship });
-      const duplicate = state.sources.find((item) => normalizedDuplicateKey(item.paragraphs.join("\n\n")) === normalizedDuplicateKey(draft));
+      const duplicate = state.sources.find((item) => normalizedDuplicateKey(sourceIdentityText(item)) === normalizedDuplicateKey(draft));
       if (duplicate && !replaceDuplicate) {
         setError("This exact source has already been imported.");
         return;
@@ -65,7 +71,7 @@ export default function Library({ state, setState }: Props) {
 
   function addFileSource() {
     if (!filePreview) return;
-    const duplicate = state.sources.find((item) => normalizedDuplicateKey(item.paragraphs.join("\n\n")) === normalizedDuplicateKey(filePreview.paragraphs.map((paragraph) => paragraph.text).join("\n\n")));
+    const duplicate = state.sources.find((item) => normalizedDuplicateKey(sourceIdentityText(item)) === normalizedDuplicateKey(filePreview.paragraphs.map((paragraph) => paragraph.text).join("\n\n")));
     if (duplicate && !replaceDuplicate) {
       setError("This exact source has already been imported. Enable replace metadata to continue.");
       return;
@@ -163,7 +169,7 @@ export default function Library({ state, setState }: Props) {
         <button type="button" onClick={addSource} disabled={!draft.trim()}>
           Import
         </button>
-        <button type="button" onClick={() => setDuplicateResult(isDuplicateText(draft, state.sources.map((source) => source.paragraphs.join("\n\n"))) ? "Duplicate found. Review metadata before importing." : "No duplicate found.")}>
+        <button type="button" onClick={() => setDuplicateResult(isDuplicateText(draft, state.sources.map(sourceIdentityText)) ? "Duplicate found. Review metadata before importing." : "No duplicate found.")}>
           Check duplicate
         </button>
         <label><input type="checkbox" checked={replaceDuplicate} onChange={(event) => setReplaceDuplicate(event.target.checked)} /> Replace duplicate metadata</label>

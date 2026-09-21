@@ -108,6 +108,35 @@ describe("Library reviewed imports", () => {
     expect(replaced.paragraphDecisions[0].decision).toBe("excluded");
   });
 
+  it("keeps excluded paragraphs part of duplicate identity", async () => {
+    const setState = vi.fn();
+    render(<Library state={{ ...appState(), sources: [] }} setState={setState} />);
+    const input = screen.getByLabelText(/Writing file/);
+    fireEvent.change(input, { target: { files: [new File(["Keep.\n\nExclude."], "first.txt")] } });
+    await screen.findByRole("region", { name: "Import preview" });
+    fireEvent.click(screen.getByLabelText("Include paragraph 2"));
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    const first = setState.mock.calls[0][0].sources[0];
+    setState.mockClear();
+
+    document.body.innerHTML = "";
+    render(<Library state={{ ...appState(), sources: [first] }} setState={setState} />);
+    fireEvent.change(screen.getByLabelText(/Writing file/), { target: { files: [new File(["KEEP.\n\nEXCLUDE."], "second.txt")] } });
+    await screen.findByRole("region", { name: "Import preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/already been imported/i);
+    expect(setState).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Replace duplicate metadata"));
+    fireEvent.click(screen.getByRole("button", { name: "Import file" }));
+    const replaced = setState.mock.calls[0][0].sources;
+    expect(replaced).toHaveLength(1);
+    expect(replaced[0].id).toBe(first.id);
+    expect(replaced[0].status).toBe(first.status);
+    expect(replaced[0].createdAt).toBe(first.createdAt);
+    expect(replaced[0].paragraphDecisions).toEqual(first.paragraphDecisions);
+  });
+
   it("ignores stale file extraction results", async () => {
     const deferred = new Map<string, { resolve: (value: sourceImport.ImportPreview) => void }>();
     vi.spyOn(sourceImport, "importWritingFile").mockImplementation((file) => new Promise((resolve) => { deferred.set(file.name, { resolve }); }));
