@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-const ARCHIVE_NAME: &str = "My Voice.app.zip";
+const ARCHIVE_NAME: &str = "My.Voice.app.zip";
 const BUNDLE_ID: &str = "com.studiointhebox.myvoice";
 const LATEST_URL: &str = "https://api.github.com/repos/filipego/my-voice/releases/latest";
 const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
@@ -324,17 +324,17 @@ mod tests {
     #[test]
     fn download_urls_stay_on_this_repository() {
         assert!(require_release_download_url(
-            "https://github.com/filipego/my-voice/releases/download/v0.1.4/My%20Voice.app.zip",
+            "https://github.com/filipego/my-voice/releases/download/v0.1.4/My.Voice.app.zip",
             "v0.1.4"
         )
         .is_ok());
         assert!(require_release_download_url(
-            "https://example.com/filipego/my-voice/releases/download/v0.1.4/My%20Voice.app.zip",
+            "https://example.com/filipego/my-voice/releases/download/v0.1.4/My.Voice.app.zip",
             "v0.1.4"
         )
         .is_err());
         assert!(require_release_download_url(
-            "https://github.com/filipego/my-voice/releases/download/v0.1.3/My%20Voice.app.zip",
+            "https://github.com/filipego/my-voice/releases/download/v0.1.3/My.Voice.app.zip",
             "v0.1.4"
         )
         .is_err());
