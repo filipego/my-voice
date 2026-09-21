@@ -40,3 +40,50 @@ fn database_persists_across_reopening_the_file() {
     assert_eq!(reloaded.profile["voiceName"], "Filipe");
     assert_eq!(reloaded.sources[0]["id"], "source-1");
 }
+
+#[test]
+fn unsupported_storage_version_cannot_be_loaded_or_overwritten() {
+    let dir = TempDir::new().expect("temp directory");
+    let path = dir.path().join("my-voice.db");
+
+    let database = Database::open(&path).expect("database opens");
+    drop(database);
+
+    let original_state = serde_json::json!({
+        "profile": {"voiceName": "Future Voice"},
+        "sources": [{"id": "future-source"}]
+    });
+    let wrapped = serde_json::json!({
+        "storageVersion": 2,
+        "state": original_state
+    });
+    let connection = rusqlite::Connection::open(&path).expect("raw database opens");
+    connection
+        .execute(
+            "INSERT INTO voice_state (id, storage_version, state) VALUES (1, 2, ?1)",
+            rusqlite::params![wrapped.to_string()],
+        )
+        .expect("future state seeds");
+    drop(connection);
+
+    let database = Database::open(&path).expect("database reopens");
+    assert!(database.load_state().is_err());
+    assert!(database
+        .save_state(AppState {
+            profile: serde_json::json!({"voiceName": "Current Voice"}),
+            sources: serde_json::json!([]),
+        })
+        .is_err());
+    drop(database);
+
+    let connection = rusqlite::Connection::open(&path).expect("raw database reopens");
+    let (storage_version, state): (u32, String) = connection
+        .query_row(
+            "SELECT storage_version, state FROM voice_state WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("future state remains");
+    assert_eq!(storage_version, 2);
+    assert_eq!(state, wrapped.to_string());
+}

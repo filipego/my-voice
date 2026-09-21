@@ -35,7 +35,7 @@ describe("storage", () => {
 
     await saveState(saved);
     expect(invoke).toHaveBeenCalledWith("save_voice_state", { state: saved });
-    expect(await loadState()).toBe(saved);
+    expect(await loadState()).toEqual(saved);
   });
 
   it("falls back to localStorage when no native commands are installed", async () => {
@@ -51,6 +51,12 @@ describe("storage", () => {
 
     await expect(saveState(state())).rejects.toThrow("SQLite unavailable");
     expect(await loadState()).toEqual({ profile: initialProfile, sources: [] });
+  });
+
+  it("surfaces unsupported native storage versions instead of replacing them", async () => {
+    invoke.mockRejectedValue(new Error("unsupported storage version: 2"));
+
+    await expect(loadState()).rejects.toThrow("unsupported storage version: 2");
   });
 
   it("normalizes persisted profiles with missing rule and version arrays", async () => {

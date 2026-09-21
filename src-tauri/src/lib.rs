@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -98,7 +98,19 @@ impl Database {
             state,
         };
         let encoded = serde_json::to_string(&wrapped).map_err(|error| error.to_string())?;
-        self.lock()
+        let connection = self.lock();
+        let existing_version: Option<u32> = connection
+            .query_row(
+                "SELECT storage_version FROM voice_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(version) = existing_version.filter(|version| *version != 1) {
+            return Err(format!("unsupported storage version: {version}"));
+        }
+        connection
             .execute(
                 "INSERT INTO voice_state (id, storage_version, state) VALUES (1, ?1, ?2)
                  ON CONFLICT(id) DO UPDATE SET storage_version = excluded.storage_version, state = excluded.state",

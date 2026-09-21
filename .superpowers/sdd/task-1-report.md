@@ -25,3 +25,24 @@
 ## Concerns
 
 - `npm install` reported 5 existing dependency audit findings (3 moderate, 1 high, 1 critical); dependency versions were not changed.
+
+## Fix: preserve unsupported voice state versions
+
+### Files changed
+
+- `src/core/storage.ts` — replaced the broad partial-state cast with record narrowing, preserved valid normalized profile fields, and rethrew unsupported native storage-version errors instead of silently returning an empty state.
+- `tests/storage.test.ts` — added a regression for surfacing an unsupported native storage version; adjusted the native round-trip assertion to verify normalized value equality.
+- `src-tauri/src/lib.rs` — checks an existing row's storage version before upsert and rejects future versions without modifying the row.
+- `src-tauri/tests/persistence.rs` — seeds a version-2 row, verifies load/save both reject, and verifies the original version and JSON remain unchanged.
+
+### Tests
+
+- Red: `npm test -- tests/storage.test.ts` failed on the new unsupported-version test because `loadState` swallowed the error.
+- Red: `cargo test --manifest-path src-tauri/Cargo.toml --test persistence` failed because `save_state` overwrote the seeded version-2 row.
+- Green: `npm run typecheck` — passed.
+- Green: `npm test -- tests/storage.test.ts` — 6 tests passed.
+- Green: `cargo test --manifest-path src-tauri/Cargo.toml --test persistence` — 3 tests passed.
+
+### Concerns
+
+- The normalized boundary still treats persisted rule/version array entries as domain values after checking their array shape; deeper per-entry schema validation is outside this focused Task 1 fix.

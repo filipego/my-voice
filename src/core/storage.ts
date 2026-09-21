@@ -25,22 +25,34 @@ function tauriInvoke(): TauriInternals["invoke"] | null {
   return typeof internals?.invoke === "function" ? internals.invoke : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isUnsupportedStorageVersionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("unsupported storage version:");
+}
+
 export function normalizeAppState(input: unknown): AppState {
-  const candidate = input && typeof input === "object"
-    ? (input as Partial<AppState>)
-    : {};
-  const rawProfile = candidate.profile && typeof candidate.profile === "object"
-    ? candidate.profile
-    : {};
+  const candidate = isRecord(input) ? input : {};
+  const rawProfile = isRecord(candidate.profile) ? candidate.profile : {};
+  const sources = Array.isArray(candidate.sources) ? candidate.sources : [];
 
   if (
-    candidate.profile &&
     Array.isArray(rawProfile.rules) &&
     Array.isArray(rawProfile.versions) &&
     typeof rawProfile.currentVersion === "number" &&
     Array.isArray(candidate.sources)
   ) {
-    return candidate as AppState;
+    return {
+      profile: {
+        rules: rawProfile.rules,
+        versions: rawProfile.versions,
+        currentVersion: rawProfile.currentVersion,
+      } as Profile,
+      sources,
+    };
   }
 
   return {
@@ -53,7 +65,7 @@ export function normalizeAppState(input: unknown): AppState {
         ? rawProfile.currentVersion
         : initialProfile.currentVersion,
     },
-    sources: Array.isArray(candidate.sources) ? candidate.sources : [],
+    sources,
   };
 }
 
@@ -70,7 +82,8 @@ export async function loadState(): Promise<AppState> {
   if (invoke) {
     try {
       return normalizeAppState(await invoke("load_voice_state"));
-    } catch {
+    } catch (error) {
+      if (isUnsupportedStorageVersionError(error)) throw error;
       return normalizeAppState(null);
     }
   }
