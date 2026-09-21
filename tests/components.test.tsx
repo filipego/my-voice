@@ -400,9 +400,11 @@ describe("Test and Use rollback", () => {
     expect(await screen.findByDisplayValue("Baseline copy.")).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Voice copy.")).toBeInTheDocument();
     expect(generateDraft).toHaveBeenCalledTimes(2);
+    fireEvent.change(brief, { target: { value: "A later brief." } });
+    fireEvent.change(screen.getByLabelText("Audience"), { target: { value: "team" } });
     fireEvent.change(screen.getByLabelText("Your edited draft"), { target: { value: "Edited copy." } });
     fireEvent.click(screen.getByRole("button", { name: "Transfer correction pair" }));
-    expect(onTransferToTeach).toHaveBeenCalledWith(expect.objectContaining({ generatedDraft: "Voice copy.", finalRevision: "Edited copy.", audience: "", areaId: "email", profileVersion: 1 }));
+    expect(onTransferToTeach).toHaveBeenCalledWith(expect.objectContaining({ generatedDraft: "Voice copy.", finalRevision: "Edited copy.", task: "Ask for a meeting.", audience: "", areaId: "email", profileVersion: 1 }));
   });
 
   it("disables generation for an empty brief and keeps the last draft after failure", async () => {

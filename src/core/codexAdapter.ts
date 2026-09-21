@@ -35,6 +35,7 @@ export interface GenerateDraftRequest {
   profileVersion: number;
   useVoice: boolean;
   effort?: CodexEffort;
+  voiceGuidance?: string[];
 }
 
 export interface GeneratedDraft {
@@ -102,23 +103,25 @@ export function createCodexPrompt(request: CodexAnalysisRequest): string {
 export async function generateDraft(request: GenerateDraftRequest): Promise<GeneratedDraft> {
   const brief = request.brief.trim();
   if (!brief) throw new Error("A brief is required to generate a draft.");
+  const effort = request.effort ?? "medium";
   const result = await invoke<unknown>("generate_draft", {
-    ...request,
-    brief,
+    request: { ...request, brief, effort },
   });
   if (!result || typeof result !== "object") throw new Error("Codex returned an invalid draft.");
   const candidate = result as Partial<GeneratedDraft>;
   if (typeof candidate.text !== "string" || !candidate.text.trim()) {
     throw new Error("Codex returned an empty draft.");
   }
-  const effort = candidate.effort === "high" || candidate.effort === "max" ? candidate.effort : "medium";
+  if (candidate.model !== "gpt-5.6-luna" || candidate.effort !== effort || candidate.areaId !== request.areaId || candidate.profileVersion !== request.profileVersion || candidate.usedVoice !== request.useVoice) {
+    throw new Error("Codex draft provenance does not match the requested context.");
+  }
   return {
     text: candidate.text,
     model: "gpt-5.6-luna",
     effort,
-    areaId: typeof candidate.areaId === "string" ? candidate.areaId : request.areaId,
-    profileVersion: typeof candidate.profileVersion === "number" ? candidate.profileVersion : request.profileVersion,
-    usedVoice: candidate.usedVoice === true,
+    areaId: request.areaId,
+    profileVersion: request.profileVersion,
+    usedVoice: request.useVoice,
   };
 }
 

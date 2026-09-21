@@ -26,7 +26,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   const [audience, setAudience] = useState("");
   const [areaId, setAreaId] = useState("email");
   const [editedDraft, setEditedDraft] = useState("");
-  const [drafts, setDrafts] = useState<{ baseline: GeneratedDraft; inVoice: GeneratedDraft } | null>(null);
+  const [drafts, setDrafts] = useState<{ baseline: GeneratedDraft; inVoice: GeneratedDraft; context: { brief: string; audience: string; areaId: string; profileVersion: number } } | null>(null);
   const [publication, setPublication] = useState<{
     path: string;
     backupPath: string | null;
@@ -41,12 +41,16 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
     setIsGenerating(true);
     setDraftError(null);
     try {
-      const request = { brief: prompt, audience, areaId, profileVersion: state.profile.currentVersion, useVoice: false } as const;
+      const context = { brief: prompt.trim(), audience, areaId, profileVersion: state.profile.currentVersion };
+      const voiceGuidance = state.profile.rules
+        .filter((rule) => (rule.state === "approved" || rule.state === "locked") && (rule.scope === "core" || rule.scope === areaId))
+        .map((rule) => rule.instruction);
+      const request = { ...context, useVoice: false, voiceGuidance } as const;
       const [baseline, inVoice] = await Promise.all([
         generateDraft(request),
         generateDraft({ ...request, useVoice: true }),
       ]);
-      setDrafts({ baseline, inVoice });
+      setDrafts({ baseline, inVoice, context });
       setEditedDraft(inVoice.text);
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : "Could not generate drafts.");
@@ -115,7 +119,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
           <p className="note">
             Baseline: {drafts.baseline.model} · {drafts.baseline.effort} · no voice guidance. In-voice: {drafts.inVoice.model} · {drafts.inVoice.effort} · {drafts.inVoice.areaId} · profile v{drafts.inVoice.profileVersion}.
           </p>
-          <button type="button" className="chip" disabled={!editedDraft.trim()} onClick={() => onTransferToTeach?.({ generatedDraft: drafts.inVoice.text, finalRevision: editedDraft, task: prompt.trim(), audience, areaId, profileVersion: drafts.inVoice.profileVersion })}>
+          <button type="button" className="chip" disabled={!editedDraft.trim()} onClick={() => onTransferToTeach?.({ generatedDraft: drafts.inVoice.text, finalRevision: editedDraft, task: drafts.context.brief, audience: drafts.context.audience, areaId: drafts.context.areaId, profileVersion: drafts.context.profileVersion })}>
             Transfer correction pair
           </button>
         </>

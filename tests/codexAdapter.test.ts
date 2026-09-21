@@ -61,14 +61,14 @@ describe("Codex analysis boundary", () => {
     vi.mocked(invoke).mockResolvedValue({ text: "A baseline draft.", model: "gpt-5.6-luna", effort: "medium", areaId: "email", profileVersion: 3, usedVoice: false });
     const result = await generateDraft({ brief: "Ask for a meeting.", audience: "client", areaId: "email", profileVersion: 3, useVoice: false });
     expect(result.text).toBe("A baseline draft.");
-    expect(invoke).toHaveBeenCalledWith("generate_draft", {
-      brief: "Ask for a meeting.", audience: "client", areaId: "email", profileVersion: 3, useVoice: false,
-    });
+    expect(invoke).toHaveBeenCalledWith("generate_draft", { request: {
+      brief: "Ask for a meeting.", audience: "client", areaId: "email", profileVersion: 3, useVoice: false, effort: "medium",
+    }});
   });
 
   it("generates an in-voice draft for the selected area and version", async () => {
     vi.mocked(invoke).mockResolvedValue({ text: "A voice-aware draft.", model: "gpt-5.6-luna", effort: "high", areaId: "essay", profileVersion: 4, usedVoice: true });
-    const result = await generateDraft({ brief: "Explain the change.", audience: "team", areaId: "essay", profileVersion: 4, useVoice: true });
+    const result = await generateDraft({ brief: "Explain the change.", audience: "team", areaId: "essay", profileVersion: 4, useVoice: true, effort: "high" });
     expect(result).toMatchObject({ text: "A voice-aware draft.", areaId: "essay", profileVersion: 4, usedVoice: true });
   });
 
@@ -76,5 +76,10 @@ describe("Codex analysis boundary", () => {
     await expect(generateDraft({ brief: "   ", audience: "client", areaId: "email", profileVersion: 1, useVoice: false })).rejects.toThrow("brief");
     vi.mocked(invoke).mockRejectedValue(new Error("draft failed"));
     await expect(generateDraft({ brief: "Write this.", audience: "client", areaId: "email", profileVersion: 1, useVoice: true })).rejects.toThrow("draft failed");
+  });
+
+  it("rejects a draft whose native provenance differs from the request", async () => {
+    vi.mocked(invoke).mockResolvedValue({ text: "Wrong context.", model: "gpt-5.6-luna", effort: "medium", areaId: "essay", profileVersion: 9, usedVoice: true });
+    await expect(generateDraft({ brief: "Write this.", audience: "client", areaId: "email", profileVersion: 1, useVoice: false })).rejects.toThrow("provenance");
   });
 });
