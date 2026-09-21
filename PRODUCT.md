@@ -19,6 +19,27 @@ My Voice makes the learning loop concrete: add approved writing, inspect what wa
 3. **Teach My Voice** — capture an AI draft beside the user's final revision, task, and audience. Classify changes so facts, audience adjustments, spelling, formatting, and style do not all become global voice rules.
 4. **Test & Use** — provide a compact test surface, profile history, skill compilation status, and rollback without becoming a document editor.
 
+## Continuous learning loop
+
+My Voice must learn from explicit before-and-after correction pairs. After a draft is generated with a published voice skill, the user can paste the generated draft beside their edited final version, identify changes the model misunderstood, and decide which lessons should be remembered. The app classifies proposed lessons as durable voice guidance, context-only guidance, a one-time change, or a wrong interpretation. Nothing becomes durable without approval.
+
+The correction record keeps the task, audience, selected voice area, profile version, generated draft, final revision, decision, and evidence links. A rejected interpretation remains recorded so the same unsupported lesson is not repeatedly proposed. Approved lessons create a reversible profile version and can be republished as a new skill version.
+
+## Modular skill package
+
+The published skill is a small router rather than one ever-growing instruction file. `SKILL.md` contains the skill name, description, selection rules, conflict priority, and links to focused Markdown references. Voice areas can be added or renamed without changing the learning model. Initial areas are:
+
+- personal email;
+- business email;
+- website copy;
+- general voice guidance.
+
+Each area has its own reference file and contains only approved rules and examples relevant to that area. A writing request can explicitly select one area, and the skill loads only the shared core plus that reference. The package includes a manifest with the profile version, area identifiers, checksums, and publication timestamp so the app can detect external edits and verify which version Codex used.
+
+## Runtime model
+
+My Voice uses the user's authenticated Codex installation and defaults routine analysis and drafting to `gpt-5.6-luna` at medium reasoning. High reasoning is reserved for ambiguous correction classification, conflict resolution, and profile synthesis. Max reasoning is an explicit retry for unusually difficult cases, never an automatic default. Local import, profile review, version history, and skill export continue to work when Codex is unavailable.
+
 ## Values
 
 - **Local ownership:** documents, evidence, profiles, and versions remain local to the installation. Local storage does not mean local inference.
@@ -39,6 +60,8 @@ My Voice is not a general chat application, email client, word processor, record
 
 - A user can import, review, duplicate-check, exclude, and approve writing without a cloud job.
 - Paired corrections produce scoped proposals the user can approve, limit, reject, or interpret as wrong.
+- A generated draft and the user's revision can be fed back into the app, producing traceable decisions without silently retraining or overgeneralizing.
 - Profile versions remain reversible and skill compilation is recoverable.
+- The published skill can select one voice area without loading unrelated area files, and its selected profile version can be verified.
 - Invalid input, malformed AI output, cancellation, and source deletion cannot silently corrupt the profile.
 - The interface remains usable with keyboard navigation and reads clearly in light and dark appearance.
