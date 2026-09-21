@@ -43,6 +43,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 16px;
 }
 
+.secondary-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.effort-control { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 0.85rem; color: var(--muted); }
+.effort-control select { padding: 6px 8px; }
+
 h1, h2 { letter-spacing: 0; margin-top: 0; }
 h1 { font-size: 1.8rem; margin-bottom: 6px; }
 h2 { font-size: 1.15rem; margin-top: 34px; }
@@ -130,6 +134,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
 @media (max-width: 760px) {
   .app-shell { padding: 24px 16px 48px; }
   .app-header, .teach-grid, .test-grid { grid-template-columns: 1fr; align-items: stretch; }
+  .secondary-status { justify-content: flex-start; }
   .form-grid { grid-template-columns: 1fr; }
   .panel { padding: 18px; }
   .tab-strip { overflow-x: auto; }

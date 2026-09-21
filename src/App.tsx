@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { loadState, saveState, type AppState } from "./core/storage";
 import { initialProfile } from "./core/profileEngine";
 import Library from "./components/Library";
 import MyVoice from "./components/MyVoice";
 import TeachMyVoice from "./components/TeachMyVoice";
 import TestAndUse from "./components/TestAndUse";
-import { runCodexAnalysis } from "./core/codexAdapter";
+import { runCodexAnalysis, type CodexConnection, type CodexEffort } from "./core/codexAdapter";
 
 type Tab = "library" | "profile" | "teach" | "test";
 
@@ -14,6 +15,8 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const skipNextSaveRef = useRef(false);
   const [tab, setTab] = useState<Tab>("library");
+  const [effort, setEffort] = useState<CodexEffort>("medium");
+  const [codexConnection, setCodexConnection] = useState<CodexConnection | null>(null);
   const tabs: { id: Tab; label: string }[] = [
     { id: "library", label: "Library" },
     { id: "profile", label: "My Voice" },
@@ -49,6 +52,20 @@ export default function App() {
     void saveState(state);
   }, [isLoaded, state]);
 
+  useEffect(() => {
+    if (!isTauri()) {
+      setCodexConnection({ available: false, authenticated: false, detail: "Desktop app required." });
+      return;
+    }
+    void invoke<CodexConnection>("check_codex_connection")
+      .then(setCodexConnection)
+      .catch((error: unknown) => setCodexConnection({
+        available: false,
+        authenticated: false,
+        detail: error instanceof Error ? error.message : "Could not check Codex status.",
+      }));
+  }, []);
+
   const evidenceCount = useMemo(
     () => state.profile.rules.reduce((count, rule) => count + rule.evidence.length, 0),
     [state.profile.rules],
@@ -61,7 +78,20 @@ export default function App() {
           <h1>My Voice</h1>
           <p>Review your writing, approve lessons, and publish a versioned Codex skill.</p>
         </div>
-        <span className="status-pill">Profile v{state.profile.currentVersion || 1}</span>
+        <div className="secondary-status" aria-label="Codex status and effort">
+          <span className="status-pill">Profile v{state.profile.currentVersion || 1}</span>
+          <span className="status-pill" role="status">
+            Codex {codexConnection?.authenticated ? "authenticated" : codexConnection?.available ? "not authenticated" : "unavailable"}
+          </span>
+          <label className="effort-control">
+            Effort
+            <select value={effort} onChange={(event) => setEffort(event.target.value as CodexEffort)}>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+          </label>
+        </div>
       </header>
 
       <nav aria-label="Main sections" className="tab-strip">
@@ -82,7 +112,11 @@ export default function App() {
         {tab === "library" && <Library state={state} setState={setState} />}
         {tab === "profile" && <MyVoice state={state} setState={setState} />}
         {tab === "teach" && (
-          <TeachMyVoice state={state} setState={setState} runCodexAnalysis={runCodexAnalysis} />
+          <TeachMyVoice
+            state={state}
+            setState={setState}
+            runCodexAnalysis={(request) => runCodexAnalysis(request, { model: "gpt-5.6-luna", effort, timeoutMs: 180_000 })}
+          />
         )}
         {tab === "test" && <TestAndUse state={state} setState={setState} />}
       </main>

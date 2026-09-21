@@ -1,10 +1,13 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     io::Write,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, OnceLock},
     sync::{Mutex, MutexGuard},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -36,6 +39,41 @@ struct CodexConnection {
     available: bool,
     authenticated: bool,
     detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexJobOptions {
+    model: String,
+    effort: String,
+    #[serde(rename = "timeoutMs")]
+    timeout_ms: u64,
+}
+
+static CODEX_JOBS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+
+fn codex_jobs() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    CODEX_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn build_codex_args(model: &str, effort: &str) -> Vec<String> {
+    vec![
+        "exec".into(),
+        "--sandbox".into(),
+        "read-only".into(),
+        "--ephemeral".into(),
+        "--skip-git-repo-check".into(),
+        "--color".into(),
+        "never".into(),
+        "--output-schema".into(),
+        "SCHEMA".into(),
+        "--output-last-message".into(),
+        "OUTPUT".into(),
+        "-m".into(),
+        model.into(),
+        "-c".into(),
+        format!("model_reasoning_effort={effort}"),
+        "-".into(),
+    ]
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -143,9 +181,7 @@ impl Database {
         };
 
         if stored_version != 1 {
-            return Err(format!(
-                "unsupported storage version: {stored_version}"
-            ));
+            return Err(format!("unsupported storage version: {stored_version}"));
         }
 
         let raw: String = connection
@@ -233,7 +269,16 @@ fn temp_codex_file(suffix: &str) -> PathBuf {
 fn run_codex_analysis(
     text: String,
     max_rules: Option<u32>,
+    model: String,
+    effort: String,
+    timeout_ms: u64,
+    job_id: String,
 ) -> Result<Vec<VoiceProposal>, String> {
+    let job_options = CodexJobOptions {
+        model,
+        effort,
+        timeout_ms,
+    };
     let max_rules = max_rules.unwrap_or(5).clamp(1, 20);
     let mut text = text.trim().to_string();
     if text.is_empty() {
@@ -249,21 +294,16 @@ fn run_codex_analysis(
     fs::write(&schema_path, r#"{"type":"array","items":{"type":"object","properties":{"instruction":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"scope":{"type":"string"}},"required":["instruction"],"additionalProperties":false}}"#)
         .map_err(|error| error.to_string())?;
 
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    codex_jobs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(job_id.clone(), cancel_flag.clone());
+    let mut args = build_codex_args(&job_options.model, &job_options.effort);
+    args[9] = schema_path.to_string_lossy().to_string();
+    args[11] = output_path.to_string_lossy().to_string();
     let mut child = Command::new("codex")
-        .args([
-            "exec",
-            "--sandbox",
-            "read-only",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--color",
-            "never",
-            "--output-schema",
-        ])
-        .arg(&schema_path)
-        .arg("--output-last-message")
-        .arg(&output_path)
-        .arg("-")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -276,18 +316,37 @@ fn run_codex_analysis(
             .map_err(|error| format!("Could not send the analysis prompt: {error}"))?;
     }
 
-    let deadline = Instant::now() + Duration::from_secs(180);
+    let deadline = Instant::now() + Duration::from_millis(job_options.timeout_ms.clamp(1, 600_000));
     loop {
         match child.try_wait().map_err(|error| error.to_string())? {
             Some(status) if status.success() => break,
             Some(_) => {
+                codex_jobs()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&job_id);
                 let _ = fs::remove_file(&schema_path);
                 let _ = fs::remove_file(&output_path);
                 return Err("Codex analysis failed.".to_string());
             }
+            None if cancel_flag.load(Ordering::Relaxed) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                codex_jobs()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&job_id);
+                let _ = fs::remove_file(&schema_path);
+                let _ = fs::remove_file(&output_path);
+                return Err("Codex analysis canceled.".to_string());
+            }
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
+                codex_jobs()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&job_id);
                 let _ = fs::remove_file(&schema_path);
                 let _ = fs::remove_file(&output_path);
                 return Err("Codex analysis timed out.".to_string());
@@ -299,9 +358,25 @@ fn run_codex_analysis(
     let raw = fs::read_to_string(&output_path)
         .map_err(|error| format!("Could not read the Codex result: {error}"))?;
     let result = parse_codex_output(&raw, max_rules as usize);
+    codex_jobs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&job_id);
     let _ = fs::remove_file(&schema_path);
     let _ = fs::remove_file(&output_path);
     result
+}
+
+#[tauri::command]
+fn cancel_codex_job(job_id: String) -> Result<(), String> {
+    if let Some(flag) = codex_jobs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&job_id)
+    {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -317,7 +392,10 @@ fn check_codex_connection() -> CodexConnection {
                 detail: {
                     let combined = format!("{stdout}{stderr}");
                     if combined.trim().is_empty() {
-                        format!("Codex exited with status {}.", output.status.code().unwrap_or(-1))
+                        format!(
+                            "Codex exited with status {}.",
+                            output.status.code().unwrap_or(-1)
+                        )
                     } else {
                         combined.trim().to_string()
                     }
@@ -449,10 +527,43 @@ pub fn run_app() {
             load_voice_state,
             save_voice_state,
             run_codex_analysis,
+            cancel_codex_job,
             check_codex_connection,
             publish_voice_skill,
             restore_voice_skill
         ])
         .run(tauri::generate_context!())
         .expect("failed to run My Voice");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_args_pin_model_and_effort_without_global_config() {
+        let args = build_codex_args("gpt-5.6-luna", "high");
+        assert!(args.windows(2).any(|pair| pair == ["-m", "gpt-5.6-luna"]));
+        assert!(args.iter().any(|arg| arg == "model_reasoning_effort=high"));
+        assert!(!args.iter().any(|arg| arg == "config.toml"));
+    }
+
+    #[test]
+    fn malformed_output_is_rejected() {
+        assert!(parse_codex_output("not json", 5).is_err());
+        assert!(parse_codex_output("[]", 5).is_err());
+    }
+
+    #[test]
+    fn cancellation_marks_a_registered_job() {
+        let id = "test-cancel".to_string();
+        let flag = Arc::new(AtomicBool::new(false));
+        codex_jobs()
+            .lock()
+            .unwrap()
+            .insert(id.clone(), flag.clone());
+        cancel_codex_job(id).expect("cancel command succeeds");
+        assert!(flag.load(Ordering::Relaxed));
+        codex_jobs().lock().unwrap().clear();
+    }
 }

@@ -19,6 +19,23 @@ export interface CodexAnalysisRequest {
   maxRules?: number;
 }
 
+export type CodexEffort = "medium" | "high" | "max";
+
+export interface CodexJobOptions {
+  model: "gpt-5.6-luna";
+  effort: CodexEffort;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+const defaultCodexJobOptions: CodexJobOptions = {
+  model: "gpt-5.6-luna",
+  effort: "medium",
+  timeoutMs: 180_000,
+};
+
+let nextJobId = 0;
+
 export interface VoiceProposal {
   instruction: string;
   evidence: string[];
@@ -64,12 +81,55 @@ export function createCodexPrompt(request: CodexAnalysisRequest): string {
   ].join("\n");
 }
 
-export async function runCodexAnalysis(request: CodexAnalysisRequest): Promise<VoiceProposal[]> {
+export async function runCodexAnalysis(
+  request: CodexAnalysisRequest,
+  suppliedOptions?: CodexJobOptions,
+): Promise<VoiceProposal[]> {
   if (!isTauri()) throw new Error("Analysis requires the My Voice desktop app.");
   if (!request.text.trim()) throw new Error("No approved writing is available to analyze.");
   const maxRules = Math.max(1, Math.min(20, Math.floor(request.maxRules ?? 5)));
+  const options = { ...defaultCodexJobOptions, ...suppliedOptions };
+  if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+    throw new Error("Codex timeout must be greater than zero.");
+  }
+  const jobId = `codex-job-${++nextJobId}`;
+  const args = {
+    text: request.text,
+    maxRules,
+    model: options.model,
+    effort: options.effort,
+    timeoutMs: options.timeoutMs,
+    jobId,
+  };
+  const cancel = () => {
+    void invoke("cancel_codex_job", { jobId }).catch(() => undefined);
+  };
+  if (options.signal?.aborted) {
+    cancel();
+    const error = new Error("Codex analysis canceled.");
+    error.name = "AbortError";
+    throw error;
+  }
   try {
-    const result = await invoke<unknown>("run_codex_analysis", { text: request.text, maxRules });
+    const resultPromise = invoke<unknown>("run_codex_analysis", args);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let abortHandler: (() => void) | undefined;
+    const cancellation = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        cancel();
+        reject(new Error("Codex analysis timed out."));
+      }, options.timeoutMs);
+      abortHandler = () => {
+        cancel();
+        const error = new Error("Codex analysis canceled.");
+        error.name = "AbortError";
+        reject(error);
+      };
+      options.signal?.addEventListener("abort", abortHandler, { once: true });
+    });
+    const result = await Promise.race([resultPromise, cancellation]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (abortHandler) options.signal?.removeEventListener("abort", abortHandler);
     return parseVoiceProposals(result, maxRules);
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
