@@ -9,6 +9,7 @@ import { initialProfile, proposeRule, publishProfile } from "../src/core/profile
 import { createSource } from "../src/core/sourceImport";
 import * as sourceImport from "../src/core/sourceImport";
 import type { AppState } from "../src/core/storage";
+import { createCorrectionRecord, decideCorrection } from "../src/core/correctionEngine";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -178,6 +179,25 @@ describe("Library reviewed imports", () => {
 });
 
 describe("Teach correction actions", () => {
+  it("restores persisted decisions and targets the remaining stable proposal", () => {
+    const generatedDraft = "I am writing to ask whether we can meet.";
+    const finalRevision = "Can we meet?";
+    const record = createCorrectionRecord({ task: "follow-up", audience: "client", areaId: "email", profileVersion: 0, generatedDraft, finalRevision });
+    const rejected = decideCorrection(initialProfile, record, 0, "wrong-interpretation").record;
+    const state = { ...appState(), corrections: [rejected] };
+    const setState = vi.fn();
+    render(<TeachMyVoice state={state} setState={setState} />);
+    fireEvent.change(screen.getByLabelText("AI draft"), { target: { value: generatedDraft } });
+    fireEvent.change(screen.getByLabelText("Your final"), { target: { value: finalRevision } });
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "follow-up" } });
+    fireEvent.change(screen.getByLabelText("Audience"), { target: { value: "client" } });
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Remember this" }));
+    expect(setState).toHaveBeenCalledTimes(1);
+    expect(setState.mock.calls[0][0].profile.rules).toHaveLength(3);
+    expect(setState.mock.calls[0][0].corrections[0].decisions).toHaveLength(2);
+  });
+
   it("proposes style and audience lessons with distinct outcomes", () => {
     const setState = vi.fn();
     render(<TeachMyVoice state={appState()} setState={setState} />);
