@@ -1,4 +1,4 @@
-export type RuleScope = "core" | "email" | "essay" | "plan" | "other";
+export type RuleScope = "core" | "email" | "essay" | "plan" | "other" | (string & {});
 export type RuleState = "proposed" | "approved" | "rejected" | "locked" | "superseded";
 export type ProposalOrigin = "direct-instruction" | "correction-pair" | "writing-sample";
 
