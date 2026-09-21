@@ -115,18 +115,18 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   return (
     <section className="panel" aria-labelledby="test-heading">
       <h2 id="test-heading">Test & Use</h2>
-      <div className="test-grid">
-        <label>
+      <div className="test-grid test-editor-grid">
+        <label className="field field-large">
           Brief
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={8} placeholder="What are you writing?" />
         </label>
         <pre className="skill-preview" aria-label="Compiled skill">{compiled.files["SKILL.md"]}</pre>
       </div>
-      <div className="form-grid">
+      <div className="form-grid test-context-grid">
         <label>Audience<input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Who is this for?" /></label>
         <label>Voice area<select value={areaId} onChange={(event) => setAreaId(event.target.value)}><option value="email">Email</option><option value="essay">Essay</option><option value="plan">Plan</option><option value="core">Core</option></select></label>
       </div>
-      <div className="action-row">
+      <div className="action-row action-row-primary">
         <button type="button" className="primary" onClick={handleGenerateDrafts} disabled={!prompt.trim() || isGenerating}>
           {isGenerating ? "Generating…" : "Generate drafts"}
         </button>
@@ -152,7 +152,7 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
           </button>
         </>
       )}
-      <div className="publish-bar">
+      <div className="publish-bar" aria-label="Skill actions">
         <button type="button" className="primary" onClick={handlePublish}>
           Publish to Codex
         </button>

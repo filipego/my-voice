@@ -971,7 +971,16 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_app() {
     tauri::Builder::default()
-        .setup(run)
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_process::init())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+            run(app)
+        })
         .invoke_handler(tauri::generate_handler![
             load_voice_state,
             save_voice_state,

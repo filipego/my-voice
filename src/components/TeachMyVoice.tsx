@@ -187,7 +187,7 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
           <textarea value={after} onChange={(event) => setAfter(event.target.value)} rows={10} />
         </label>
       </div>
-      <label>
+      <label className="single-field">
         Scope
         <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}>
           <option value="core">Core</option>
