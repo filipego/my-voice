@@ -883,26 +883,34 @@ mod tests {
         let child = command.spawn().expect("early launcher starts");
         let flag = Arc::new(AtomicBool::new(false));
         let worker_flag = flag.clone();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            deliver_prompt_and_supervise(
+            let result = deliver_prompt_and_supervise(
                 child,
                 "é".repeat(24_000),
                 worker_flag,
                 Instant::now() + Duration::from_secs(10),
-            )
+            );
+            let _ = result_tx.send(result);
         });
         let deadline = Instant::now() + Duration::from_secs(1);
         while (!pid_path.exists() || !marker_path.exists()) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        flag.store(true, Ordering::Relaxed);
-        assert_eq!(
-            worker
-                .join()
-                .expect("early launcher worker joins")
-                .unwrap_err(),
-            "Codex analysis canceled."
+        assert!(
+            pid_path.exists(),
+            "descendant PID should be recorded before cancellation"
         );
+        assert!(
+            marker_path.exists(),
+            "launcher EXIT marker should be recorded before cancellation"
+        );
+        flag.store(true, Ordering::Relaxed);
+        let result = result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("early launcher worker should finish promptly");
+        assert_eq!(result.unwrap_err(), "Codex analysis canceled.");
+        worker.join().expect("early launcher worker joins");
         let pid = fs::read_to_string(&pid_path)
             .expect("descendant pid recorded")
             .trim()
