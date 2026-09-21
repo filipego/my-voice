@@ -23,8 +23,10 @@ Date: 2026-09-21
 - Test & Use anti-slop warnings with area-scoped allow/dismiss decisions persisted in app state and included in the published package.
 - Published package area/profile-version verification is now exposed in the desktop flow; live Codex discovery remains separately unverified.
 
-## Not claimed complete
+## Exact packaged-surface evidence
 
-- A launched, installed macOS desktop run through the complete workflow was not available in this acceptance pass.
-- `npx tauri dev` compiled the native target successfully, but the running window was not exposed to the desktop app inventory in this environment, so interaction proof could not be captured.
-- Codex area/version selection was not independently proven against a live discovered Codex session; publication reports reload/unverified guidance honestly.
+- Bundle: `src-tauri/target/release/bundle/macos/My Voice.app`
+- The packaged window was exposed to the desktop verifier as `My Voice`.
+- Exercised Library → Test & Use → draft generation, editable final revision, Transfer correction pair, Teach prefill, and Just this time.
+- Published to `/Users/filipego/.codex/skills/my-voice` and received the visible status `Published selection verified.` with `Published manifest matches the requested area and profile version.` for Core/profile v1.
+- Publication still reports reload guidance because live Codex discovery after reload was not independently observed.
