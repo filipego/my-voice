@@ -58,8 +58,11 @@ function isFactualChange(before: string, after: string): boolean {
   const numbersBefore = before.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
   const numbersAfter = after.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
   if (numbersBefore.join("|") !== numbersAfter.join("|")) return true;
-  const days = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
-  return days.test(before) && days.test(after) && normalizeForCompare(before) !== normalizeForCompare(after);
+  const days = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
+  const beforeDays = before.match(days) ?? [];
+  const afterDays = after.match(days) ?? [];
+  return beforeDays.length > 0 && afterDays.length > 0 &&
+    beforeDays.map((day) => day.toLowerCase()).join("|") !== afterDays.map((day) => day.toLowerCase()).join("|");
 }
 
 export function classifyChanges(before: string, after: string): SentenceChange[] {

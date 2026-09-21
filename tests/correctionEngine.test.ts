@@ -26,4 +26,22 @@ describe("correction engine", () => {
     expect(result.record.decisions[0].decision).toBe("just-this-time");
     expect(result.profile).toEqual(initialProfile);
   });
+
+  it("approves durable guidance and preserves stable proposal identity after factual edits", () => {
+    const record = createCorrectionRecord({
+      task: "follow-up", audience: "client", areaId: "email", profileVersion: 1,
+      generatedDraft: "Meet Tuesday. I am writing to ask.", finalRevision: "Meet Wednesday. Can we meet?",
+    });
+    const voice = record.proposals.find((proposal) => proposal.editIds.some((id) => record.edits.find((edit) => edit.id === id)?.kind === "voice"));
+    expect(voice).toBeDefined();
+    const result = decideCorrection(initialProfile, record, record.proposals.indexOf(voice!), "remember");
+    expect(result.profile.rules[0].state).toBe("approved");
+    expect(result.profile.currentVersion).toBe(1);
+  });
+
+  it("does not classify an unchanged weekday as factual", () => {
+    const edits = classifyCorrection("Meet Tuesday. I am writing to ask.", "Meet Tuesday. Can we meet?");
+    expect(edits.some((edit) => edit.kind === "factual")).toBe(false);
+    expect(edits.some((edit) => edit.kind === "voice")).toBe(true);
+  });
 });

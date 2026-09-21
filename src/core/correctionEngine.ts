@@ -1,5 +1,5 @@
 import { classifyChanges, type SentenceChange } from "./diffEngine";
-import { proposeRule, publishProfile, type Profile, type RuleScope } from "./profileEngine";
+import { proposeRule, publishProfile, setRuleState, type Profile, type RuleScope } from "./profileEngine";
 
 export type CorrectionDecision = "remember" | "context-only" | "just-this-time" | "wrong-interpretation";
 
@@ -58,10 +58,11 @@ function ruleScopeFor(areaId: string): RuleScope {
 function classifyFactual(before: string, after: string): boolean {
   const numbersBefore = before.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
   const numbersAfter = after.match(/\b\d+(?:[./-]\d+)*\b/g) ?? [];
-  return numbersBefore.join("|") !== numbersAfter.join("|") ||
-    (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(before) &&
-      /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(after) &&
-      numbersBefore.join("|") === numbersAfter.join("|"));
+  if (numbersBefore.join("|") !== numbersAfter.join("|")) return true;
+  const days = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
+  const beforeDays = before.match(days) ?? [];
+  const afterDays = after.match(days) ?? [];
+  return beforeDays.map((day) => day.toLowerCase()).join("|") !== afterDays.map((day) => day.toLowerCase()).join("|");
 }
 
 export function classifyCorrection(before: string, after: string): ClassifiedEdit[] {
@@ -123,13 +124,15 @@ export function decideCorrection(
   };
   if (decision === "remember" || decision === "context-only") {
     const scope: RuleScope = decision === "context-only" ? ruleScopeFor(record.areaId) : "core";
-    const next = proposeRule(profile, {
+    const proposed = proposeRule(profile, {
       instruction: proposal.instruction,
       evidence: [record.generatedDraft, record.finalRevision],
       scope,
       origin: "correction-pair",
     });
-    return { profile: publishProfile(next, `Learned from correction: ${record.task}.`), record: nextRecord };
+    const created = proposed.rules[proposed.rules.length - 1];
+    const approved = created ? setRuleState(proposed, created.id, "approved") : proposed;
+    return { profile: publishProfile(approved, `Learned from correction: ${record.task}.`), record: nextRecord };
   }
   return { profile, record: nextRecord };
 }

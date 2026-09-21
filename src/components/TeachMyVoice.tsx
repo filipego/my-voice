@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { VoiceProposal } from "../core/codexAdapter";
 import type { AppState } from "../core/storage";
-import { classifyChanges, proposeCorrectionRules } from "../core/diffEngine";
+import { classifyChanges } from "../core/diffEngine";
 import { proposeRule } from "../core/profileEngine";
 import type { RuleScope } from "../core/profileEngine";
 import { createCorrectionRecord, decideCorrection, type CorrectionDecision, type CorrectionRecord } from "../core/correctionEngine";
@@ -26,12 +26,20 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   const [audience, setAudience] = useState("");
   const [activeRecord, setActiveRecord] = useState<CorrectionRecord | null>(null);
   const changes = before && after ? classifyChanges(before, after) : [];
+  const draftRecord = useMemo(() => before && after ? createCorrectionRecord({
+    task: task.trim() || "correction",
+    audience: audience.trim() || "unspecified audience",
+    areaId: scope,
+    profileVersion: state.profile.currentVersion,
+    generatedDraft: before,
+    finalRevision: after,
+  }) : null, [before, after, task, audience, scope, state.profile.currentVersion]);
   const rejectedProposalIds = new Set(
     (state.corrections ?? [])
       .filter((record) => record.generatedDraft === before && record.finalRevision === after)
       .flatMap((record) => record.proposals.filter((proposal) => proposal.rejected).map((proposal) => proposal.id)),
   );
-  const proposals = proposeCorrectionRules(changes, scope).filter((_, index) => !rejectedProposalIds.has(`proposal_edit_${index + 1}`));
+  const proposals = (draftRecord?.proposals ?? []).filter((proposal) => !rejectedProposalIds.has(proposal.id));
   const approvedText = useMemo(
     () =>
       state.sources
@@ -43,24 +51,14 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
     [state.sources],
   );
 
-  function decide(index: number, action: CorrectionDecision) {
+  function decide(proposalId: string, action: CorrectionDecision) {
     const record = activeRecord && activeRecord.generatedDraft === before && activeRecord.finalRevision === after
       ? activeRecord
-      : createCorrectionRecord({
-        task: task.trim() || "correction",
-        audience: audience.trim() || "unspecified audience",
-        areaId: scope,
-        profileVersion: state.profile.currentVersion,
-        generatedDraft: before,
-        finalRevision: after,
-      });
-    const proposal = record.proposals[index] ?? {
-      id: `proposal_fallback_${index}`,
-      instruction: proposals[index],
-      editIds: [],
-    };
-    const normalized = record.proposals[index] ? record : { ...record, proposals: [...record.proposals, proposal] };
-    const result = decideCorrection(state.profile, normalized, index, action);
+      : draftRecord;
+    if (!record) return;
+    const proposalIndex = record.proposals.findIndex((proposal) => proposal.id === proposalId);
+    if (proposalIndex < 0) return;
+    const result = decideCorrection(state.profile, record, proposalIndex, action);
     setActiveRecord(result.record);
     const corrections = [...(state.corrections ?? []).filter((item) => item.id !== result.record.id), result.record];
     setState({ ...state, profile: result.profile, corrections });
@@ -176,20 +174,20 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
       <h2>Proposed lessons</h2>
       {changes.length === 0 && <p className="empty">No changes detected yet.</p>}
       <ul className="proposal-list">
-        {proposals.map((proposal, index) => (
-          <li key={proposal}>
-            <p>{proposal}</p>
+        {proposals.map((proposal) => (
+          <li key={proposal.id}>
+            <p>{proposal.instruction}</p>
             <div className="action-row">
-              <button type="button" onClick={() => decide(index, "remember")}>Remember this</button>
+              <button type="button" onClick={() => decide(proposal.id, "remember")}>Remember this</button>
               <button
                 type="button"
                 className="chip"
-                onClick={() => decide(index, "context-only")}
+                onClick={() => decide(proposal.id, "context-only")}
               >
                 Only in this context
               </button>
-              <button type="button" className="chip" onClick={() => decide(index, "just-this-time")}>Just this time</button>
-              <button type="button" className="chip danger" onClick={() => decide(index, "wrong-interpretation")}>Wrong interpretation</button>
+              <button type="button" className="chip" onClick={() => decide(proposal.id, "just-this-time")}>Just this time</button>
+              <button type="button" className="chip danger" onClick={() => decide(proposal.id, "wrong-interpretation")}>Wrong interpretation</button>
             </div>
           </li>
         ))}
