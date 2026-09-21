@@ -13,10 +13,14 @@
     "windows": [
       {
         "title": "My Voice",
-        "width": 1080,
-        "height": 780,
-        "minWidth": 640,
-        "minHeight": 520,
+        "width": 980,
+        "height": 660,
+        "minWidth": 900,
+        "minHeight": 600,
+        "maxWidth": 1080,
+        "maxHeight": 740,
+        "center": true,
+        "resizable": true,
         "acceptFirstMouse": true
       }
     ],

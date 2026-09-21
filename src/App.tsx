@@ -9,17 +9,18 @@ import { runCodexAnalysis } from "./core/codexAdapter";
 
 type Tab = "library" | "profile" | "teach" | "test";
 
+const tabs: { id: Tab; label: string }[] = [
+  { id: "library", label: "Library" },
+  { id: "profile", label: "My Voice" },
+  { id: "teach", label: "Teach" },
+  { id: "test", label: "Test & Use" },
+];
+
 export default function App() {
   const [state, setState] = useState<AppState>({ profile: initialProfile, sources: [] });
   const [isLoaded, setIsLoaded] = useState(false);
   const skipNextSaveRef = useRef(false);
   const [tab, setTab] = useState<Tab>("library");
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "library", label: "Library" },
-    { id: "profile", label: "My Voice" },
-    { id: "teach", label: "Teach" },
-    { id: "test", label: "Test & Use" },
-  ];
 
   useEffect(() => {
     let active = true;
@@ -56,29 +57,33 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div>
+      <aside className="sidebar">
+        <div className="sidebar-brand">
           <h1>My Voice</h1>
-          <p>Review your writing, approve lessons, and publish a versioned Codex skill.</p>
         </div>
-        <span className="status-pill">Profile v{state.profile.currentVersion || 1}</span>
-      </header>
+        <nav aria-label="Main sections">
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="nav-button"
+              aria-current={tab === item.id ? "page" : undefined}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          <p className="sidebar-stat">Profile v{state.profile.currentVersion || 1}</p>
+          <p>
+            {state.sources.length} sources · {evidenceCount} evidence links
+          </p>
+          <p>Approved writing may be sent to OpenAI only for an analysis you start.</p>
+        </div>
+      </aside>
 
-      <nav aria-label="Main sections" className="tab-strip">
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={tab === item.id ? "tab-button active" : "tab-button"}
-            aria-current={tab === item.id}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-
-      <main>
+      <main className="workspace">
         {tab === "library" && <Library state={state} setState={setState} />}
         {tab === "profile" && <MyVoice state={state} setState={setState} />}
         {tab === "teach" && (
@@ -86,10 +91,6 @@ export default function App() {
         )}
         {tab === "test" && <TestAndUse state={state} setState={setState} />}
       </main>
-
-      <footer>
-        {state.sources.length} sources · {evidenceCount} evidence links · approved writing may be sent to OpenAI only for an analysis you start.
-      </footer>
     </div>
   );
 }

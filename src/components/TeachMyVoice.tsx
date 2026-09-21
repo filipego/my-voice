@@ -129,84 +129,109 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis }: Prop
   }
 
   return (
-    <section className="panel" aria-labelledby="teach-heading">
-      <h2 id="teach-heading">Teach from a correction</h2>
-      <div className="teach-grid">
-        <label>
-          AI draft
-          <textarea value={before} onChange={(event) => setBefore(event.target.value)} rows={10} />
-        </label>
-        <label>
-          Your final
-          <textarea value={after} onChange={(event) => setAfter(event.target.value)} rows={10} />
-        </label>
-      </div>
-      <label>
-        Scope
-        <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}>
-          <option value="core">Core</option>
-          <option value="email">Email</option>
-          <option value="essay">Essay</option>
-          <option value="plan">Plan</option>
-          <option value="other">Other</option>
-        </select>
-      </label>
+    <section className="pane" aria-labelledby="teach-heading">
+      <header className="pane-header">
+        <div>
+          <h2 id="teach-heading">Teach</h2>
+          <p>Put a draft beside your revision, then keep only the lessons you want.</p>
+        </div>
+      </header>
 
-      <h2>Proposed lessons</h2>
-      {changes.length === 0 && <p className="empty">No changes detected yet.</p>}
-      <ul className="proposal-list">
-        {proposals.map((proposal, index) => (
-          <li key={proposal}>
-            <p>{proposal}</p>
+      <div className="composer">
+        <div className="composer-stack">
+          <div className="split">
+            <label className="field">
+              AI draft
+              <textarea value={before} onChange={(event) => setBefore(event.target.value)} rows={10} />
+            </label>
+            <label className="field">
+              Your final
+              <textarea value={after} onChange={(event) => setAfter(event.target.value)} rows={10} />
+            </label>
+          </div>
+          <label className="field field-narrow">
+            Scope
+            <select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}>
+              <option value="core">Core</option>
+              <option value="email">Email</option>
+              <option value="essay">Essay</option>
+              <option value="plan">Plan</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <section className="section-block" aria-labelledby="lessons-heading">
+        <h3 id="lessons-heading">Proposed lessons</h3>
+        {changes.length === 0 && <p className="empty">No changes detected yet.</p>}
+        <ul className="item-list">
+          {proposals.map((proposal, index) => (
+            <li key={proposal} className="item-card">
+              <p className="rule-text">{proposal}</p>
+              <div className="action-row">
+                <button type="button" className="button" onClick={() => remember(index, "remember")}>
+                  Remember this
+                </button>
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => remember(index, "context-only")}
+                >
+                  Only in this context
+                </button>
+                <button type="button" className="button button-quiet" disabled>
+                  Wrong interpretation
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="section-block" aria-labelledby="codex-heading">
+        <h3 id="codex-heading">Add from Codex</h3>
+        <div className="composer">
+          <div className="composer-stack">
             <div className="action-row">
-              <button type="button" onClick={() => remember(index, "remember")}>Remember this</button>
               <button
                 type="button"
-                className="chip"
-                onClick={() => remember(index, "context-only")}
+                className="button"
+                onClick={analyzeApprovedWriting}
+                disabled={!runCodexAnalysis || isAnalyzing || !approvedText}
               >
-                Only in this context
+                {isAnalyzing ? "Analyzing..." : "Analyze approved writing"}
               </button>
-              <button type="button" className="chip danger" disabled>Wrong interpretation</button>
+              {codexStatus && (
+                <p role="status" className="inline-status">
+                  {codexStatus}
+                </p>
+              )}
             </div>
-          </li>
-        ))}
-      </ul>
-
-      <h2>Codex proposals</h2>
-      <div className="action-row">
-        <button
-          type="button"
-          onClick={analyzeApprovedWriting}
-          disabled={!runCodexAnalysis || isAnalyzing || !approvedText}
-        >
-          {isAnalyzing ? "Analyzing..." : "Analyze approved writing"}
-        </button>
-        {codexStatus && (
-          <p role="status" className="status">
-            {codexStatus}
-          </p>
-        )}
-      </div>
-      <label>
-        Codex proposals
-        <textarea
-          value={codexProposals}
-          onChange={(event) => {
-            setCodexProposals(event.target.value);
-            setCodexError(null);
-          }}
-          rows={6}
-        />
-      </label>
-      {codexError && (
-        <p role="alert" className="error">
-          {codexError}
-        </p>
-      )}
-      <button type="button" onClick={addCodexProposals}>
-        Add Codex proposals
-      </button>
+            <label className="field">
+              Codex proposals
+              <textarea
+                value={codexProposals}
+                onChange={(event) => {
+                  setCodexProposals(event.target.value);
+                  setCodexError(null);
+                }}
+                rows={6}
+              />
+            </label>
+            {codexError && (
+              <p role="alert" className="error">
+                {codexError}
+              </p>
+            )}
+            <div className="action-row">
+              <button type="button" className="button" onClick={addCodexProposals}>
+                Add Codex proposals
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </section>
   );
 }

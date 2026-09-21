@@ -50,50 +50,69 @@ export default function TestAndUse({ state, setState }: Props) {
   }
 
   return (
-    <section className="panel" aria-labelledby="test-heading">
-      <h2 id="test-heading">Test & Use</h2>
-      <div className="test-grid">
-        <label>
-          Brief
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={8} placeholder="What are you writing?" />
-        </label>
-        <pre className="skill-preview" aria-label="Compiled skill">{compiled.markdown}</pre>
-      </div>
-      <div className="publish-bar">
-        <button type="button" className="primary" onClick={handlePublish}>
-          Publish to Codex
-        </button>
-        {publication && (
-          <button type="button" className="chip" onClick={handleRestore}>
-            Restore previous
+    <section className="pane" aria-labelledby="test-heading">
+      <header className="pane-header">
+        <div>
+          <h2 id="test-heading">Test & Use</h2>
+          <p>
+            Compiled skill: <code>{compiled.name}</code> v{compiled.version}. Publishing writes locally
+            to the My Voice skill folder.
+          </p>
+        </div>
+        <div className="action-row">
+          <button type="button" className="button" onClick={handlePublish}>
+            Publish to Codex
           </button>
-        )}
-      </div>
-      <p className="note">
-        Compiled skill: <code>{compiled.name}</code> v{compiled.version}. Publishing writes locally
-        to the My Voice skill folder.
-      </p>
-      {status && <p role="status">{status}</p>}
-
-      <h2>Version history</h2>
-      {state.profile.versions.length === 0 && <p className="empty">No saved versions yet.</p>}
-      <ul className="version-list">
-        {state.profile.versions.map((version) => (
-          <li key={version.version}>
-            <strong>v{version.version}</strong> · {version.summary}
-            <button
-              type="button"
-              className="chip"
-              onClick={() => {
-                const profile = rollbackToVersion(state.profile, version.version);
-                setState({ ...state, profile });
-              }}
-            >
-              Roll back
+          {publication && (
+            <button type="button" className="button button-quiet" onClick={handleRestore}>
+              Restore previous
             </button>
-          </li>
-        ))}
-      </ul>
+          )}
+        </div>
+      </header>
+
+      <div className="split">
+        <label className="field">
+          Brief
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            rows={8}
+            placeholder="What are you writing?"
+          />
+        </label>
+        <div className="field">
+          <span>Compiled skill</span>
+          <pre className="skill-preview" aria-label="Compiled skill">{compiled.markdown}</pre>
+        </div>
+      </div>
+
+      {status && <p role="status" className="status-line">{status}</p>}
+
+      <section className="section-block" aria-labelledby="versions-heading">
+        <h3 id="versions-heading">Version history</h3>
+        {state.profile.versions.length === 0 && <p className="empty">No saved versions yet.</p>}
+        <ul className="item-list">
+          {state.profile.versions.map((version) => (
+            <li key={version.version} className="version-row">
+              <div className="version-copy">
+                <strong>v{version.version}</strong>
+                <span className="item-meta">{version.summary}</span>
+              </div>
+              <button
+                type="button"
+                className="button button-quiet"
+                onClick={() => {
+                  const profile = rollbackToVersion(state.profile, version.version);
+                  setState({ ...state, profile });
+                }}
+              >
+                Roll back
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     </section>
   );
 }
