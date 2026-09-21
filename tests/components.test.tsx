@@ -252,6 +252,19 @@ describe("Teach Codex proposals", () => {
     expect(setState).not.toHaveBeenCalled();
   });
 
+  it("exposes cancellation while analysis is running without changing the profile", async () => {
+    const setState = vi.fn();
+    let resolve: ((value: VoiceProposal[]) => void) | undefined;
+    const runCodexAnalysis = vi.fn().mockImplementation(() => new Promise<VoiceProposal[]>((done) => { resolve = done; }));
+    const onCancelAnalysis = vi.fn();
+    render(<TeachMyVoice state={appState()} setState={setState} runCodexAnalysis={runCodexAnalysis} onCancelAnalysis={onCancelAnalysis} />);
+    fireEvent.click(screen.getByRole("button", { name: "Analyze approved writing" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel analysis" }));
+    expect(onCancelAnalysis).toHaveBeenCalledTimes(1);
+    expect(setState).not.toHaveBeenCalled();
+    resolve?.([]);
+  });
+
   it("accepts valid Codex proposal JSON as proposed rules", () => {
     const setState = vi.fn();
     render(<TeachMyVoice state={appState()} setState={setState} />);

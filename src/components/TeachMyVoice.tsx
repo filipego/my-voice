@@ -8,10 +8,12 @@ import type { RuleScope } from "../core/profileEngine";
 interface Props {
   state: AppState;
   setState: (value: AppState) => void;
-  runCodexAnalysis?: (request: { text: string; maxRules: number }) => Promise<VoiceProposal[]>;
+  runCodexAnalysis?: (request: { text: string; maxRules: number; signal?: AbortSignal }) => Promise<VoiceProposal[]>;
+  onCancelAnalysis?: () => void;
+  analysisSignal?: AbortSignal;
 }
 
-export default function TeachMyVoice({ state, setState, runCodexAnalysis }: Props) {
+export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCancelAnalysis, analysisSignal }: Props) {
   const [before, setBefore] = useState("");
   const [after, setAfter] = useState("");
   const [codexProposals, setCodexProposals] = useState("");
@@ -106,7 +108,7 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis }: Prop
     setCodexStatus("Running Codex analysis...");
 
     try {
-      const returned = await runCodexAnalysis({ text: approvedText, maxRules: 5 });
+      const returned = await runCodexAnalysis({ text: approvedText, maxRules: 5, signal: analysisSignal });
       const nextProfile = returned.reduce(
         (profile, proposal) =>
           proposeRule(profile, {
@@ -182,6 +184,11 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis }: Prop
         >
           {isAnalyzing ? "Analyzing..." : "Analyze approved writing"}
         </button>
+        {isAnalyzing && onCancelAnalysis && (
+          <button type="button" className="chip" onClick={onCancelAnalysis}>
+            Cancel analysis
+          </button>
+        )}
         {codexStatus && (
           <p role="status" className="status">
             {codexStatus}

@@ -34,6 +34,15 @@ describe("Codex analysis boundary", () => {
     await expect(runCodexAnalysis({ text: "Hello" }, { model: "gpt-5.6-luna", effort: "medium", timeoutMs: 5 })).rejects.toThrow("timed out");
   });
 
+  it("removes abort listeners when native output rejects", async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    vi.mocked(invoke).mockRejectedValue(new Error("native failed"));
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    await expect(runCodexAnalysis({ text: "Hello" }, { model: "gpt-5.6-luna", effort: "medium", timeoutMs: 100, signal: controller.signal })).rejects.toThrow("native failed");
+    expect(remove).toHaveBeenCalled();
+  });
+
   it("reports the desktop requirement in browser previews", async () => {
     vi.mocked(isTauri).mockReturnValue(false);
     await expect(runCodexAnalysis({ text: "Hello" })).rejects.toThrow("desktop app");

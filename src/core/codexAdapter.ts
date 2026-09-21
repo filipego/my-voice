@@ -110,10 +110,10 @@ export async function runCodexAnalysis(
     error.name = "AbortError";
     throw error;
   }
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let abortHandler: (() => void) | undefined;
   try {
     const resultPromise = invoke<unknown>("run_codex_analysis", args);
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    let abortHandler: (() => void) | undefined;
     const cancellation = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
         cancel();
@@ -128,11 +128,12 @@ export async function runCodexAnalysis(
       options.signal?.addEventListener("abort", abortHandler, { once: true });
     });
     const result = await Promise.race([resultPromise, cancellation]);
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    if (abortHandler) options.signal?.removeEventListener("abort", abortHandler);
     return parseVoiceProposals(result, maxRules);
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (abortHandler) options.signal?.removeEventListener("abort", abortHandler);
   }
 }
 import { invoke, isTauri } from "@tauri-apps/api/core";

@@ -5,7 +5,7 @@ use std::{
     fs,
     io::Write,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     sync::{Arc, OnceLock},
     sync::{Mutex, MutexGuard},
@@ -265,8 +265,32 @@ fn temp_codex_file(suffix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("my-voice-{}-{}", unique, suffix))
 }
 
+fn supervise_child(
+    mut child: Child,
+    cancel_flag: Arc<AtomicBool>,
+    deadline: Instant,
+) -> Result<(), String> {
+    loop {
+        match child.try_wait().map_err(|error| error.to_string())? {
+            Some(status) if status.success() => return Ok(()),
+            Some(_) => return Err("Codex analysis failed.".to_string()),
+            None if cancel_flag.load(Ordering::Relaxed) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Codex analysis canceled.".to_string());
+            }
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Codex analysis timed out.".to_string());
+            }
+            None => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
+}
+
 #[tauri::command]
-fn run_codex_analysis(
+fn run_codex_analysis_blocking(
     text: String,
     max_rules: Option<u32>,
     model: String,
@@ -302,61 +326,62 @@ fn run_codex_analysis(
     let mut args = build_codex_args(&job_options.model, &job_options.effort);
     args[9] = schema_path.to_string_lossy().to_string();
     args[11] = output_path.to_string_lossy().to_string();
-    let mut child = Command::new("codex")
+    let mut child = match Command::new("codex")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("Could not start Codex: {error}"))?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            codex_jobs()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&job_id);
+            let _ = fs::remove_file(&schema_path);
+            let _ = fs::remove_file(&output_path);
+            return Err(format!("Could not start Codex: {error}"));
+        }
+    };
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|error| format!("Could not send the analysis prompt: {error}"))?;
-    }
-
-    let deadline = Instant::now() + Duration::from_millis(job_options.timeout_ms.clamp(1, 600_000));
-    loop {
-        match child.try_wait().map_err(|error| error.to_string())? {
-            Some(status) if status.success() => break,
-            Some(_) => {
-                codex_jobs()
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .remove(&job_id);
-                let _ = fs::remove_file(&schema_path);
-                let _ = fs::remove_file(&output_path);
-                return Err("Codex analysis failed.".to_string());
-            }
-            None if cancel_flag.load(Ordering::Relaxed) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                codex_jobs()
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .remove(&job_id);
-                let _ = fs::remove_file(&schema_path);
-                let _ = fs::remove_file(&output_path);
-                return Err("Codex analysis canceled.".to_string());
-            }
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                codex_jobs()
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .remove(&job_id);
-                let _ = fs::remove_file(&schema_path);
-                let _ = fs::remove_file(&output_path);
-                return Err("Codex analysis timed out.".to_string());
-            }
-            None => std::thread::sleep(Duration::from_millis(500)),
+        if let Err(error) = stdin.write_all(prompt.as_bytes()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            codex_jobs()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&job_id);
+            let _ = fs::remove_file(&schema_path);
+            let _ = fs::remove_file(&output_path);
+            return Err(format!("Could not send the analysis prompt: {error}"));
         }
     }
 
-    let raw = fs::read_to_string(&output_path)
-        .map_err(|error| format!("Could not read the Codex result: {error}"))?;
+    let deadline = Instant::now() + Duration::from_millis(job_options.timeout_ms.clamp(1, 600_000));
+    if let Err(error) = supervise_child(child, cancel_flag, deadline) {
+        codex_jobs()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&job_id);
+        let _ = fs::remove_file(&schema_path);
+        let _ = fs::remove_file(&output_path);
+        return Err(error);
+    }
+
+    let raw = match fs::read_to_string(&output_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            codex_jobs()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&job_id);
+            let _ = fs::remove_file(&schema_path);
+            let _ = fs::remove_file(&output_path);
+            return Err(format!("Could not read the Codex result: {error}"));
+        }
+    };
     let result = parse_codex_output(&raw, max_rules as usize);
     codex_jobs()
         .lock()
@@ -365,6 +390,22 @@ fn run_codex_analysis(
     let _ = fs::remove_file(&schema_path);
     let _ = fs::remove_file(&output_path);
     result
+}
+
+#[tauri::command]
+async fn run_codex_analysis(
+    text: String,
+    max_rules: Option<u32>,
+    model: String,
+    effort: String,
+    timeout_ms: u64,
+    job_id: String,
+) -> Result<Vec<VoiceProposal>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_codex_analysis_blocking(text, max_rules, model, effort, timeout_ms, job_id)
+    })
+    .await
+    .map_err(|error| format!("Codex worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -379,29 +420,29 @@ fn cancel_codex_job(job_id: String) -> Result<(), String> {
     Ok(())
 }
 
+fn codex_connection_from_output(output: &std::process::Output) -> CodexConnection {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    CodexConnection {
+        available: true,
+        authenticated: output.status.success()
+            && (stdout.contains("Logged in") || stderr.contains("Logged in")),
+        detail: if combined.trim().is_empty() {
+            format!(
+                "Codex exited with status {}.",
+                output.status.code().unwrap_or(-1)
+            )
+        } else {
+            combined.trim().to_string()
+        },
+    }
+}
+
 #[tauri::command]
 fn check_codex_connection() -> CodexConnection {
     match Command::new("codex").args(["login", "status"]).output() {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let authenticated = output.status.success() && stdout.contains("Logged in");
-            CodexConnection {
-                available: true,
-                authenticated,
-                detail: {
-                    let combined = format!("{stdout}{stderr}");
-                    if combined.trim().is_empty() {
-                        format!(
-                            "Codex exited with status {}.",
-                            output.status.code().unwrap_or(-1)
-                        )
-                    } else {
-                        combined.trim().to_string()
-                    }
-                },
-            }
-        }
+        Ok(output) => codex_connection_from_output(&output),
         Err(error) => CodexConnection {
             available: false,
             authenticated: false,
@@ -565,5 +606,36 @@ mod tests {
         cancel_codex_job(id).expect("cancel command succeeds");
         assert!(flag.load(Ordering::Relaxed));
         codex_jobs().lock().unwrap().clear();
+    }
+
+    #[test]
+    fn slow_child_is_terminated_promptly_when_canceled() {
+        let child = Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .spawn()
+            .expect("fake slow process starts");
+        let flag = Arc::new(AtomicBool::new(false));
+        let worker_flag = flag.clone();
+        let started = Instant::now();
+        let worker = std::thread::spawn(move || {
+            supervise_child(child, worker_flag, Instant::now() + Duration::from_secs(10))
+        });
+        std::thread::sleep(Duration::from_millis(40));
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            worker.join().expect("worker joins").unwrap_err(),
+            "Codex analysis canceled."
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn stderr_only_login_status_is_authenticated() {
+        let output = Command::new("sh")
+            .args(["-c", "printf 'Logged in' >&2"])
+            .output()
+            .expect("fake login status runs");
+        let status = codex_connection_from_output(&output);
+        assert!(status.authenticated);
     }
 }

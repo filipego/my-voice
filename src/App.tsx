@@ -17,6 +17,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("library");
   const [effort, setEffort] = useState<CodexEffort>("medium");
   const [codexConnection, setCodexConnection] = useState<CodexConnection | null>(null);
+  const [analysisController, setAnalysisController] = useState(() => new AbortController());
   const tabs: { id: Tab; label: string }[] = [
     { id: "library", label: "Library" },
     { id: "profile", label: "My Voice" },
@@ -71,6 +72,11 @@ export default function App() {
     [state.profile.rules],
   );
 
+  function cancelAnalysis() {
+    analysisController.abort();
+    setAnalysisController(new AbortController());
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -115,7 +121,9 @@ export default function App() {
           <TeachMyVoice
             state={state}
             setState={setState}
-            runCodexAnalysis={(request) => runCodexAnalysis(request, { model: "gpt-5.6-luna", effort, timeoutMs: 180_000 })}
+            analysisSignal={analysisController.signal}
+            onCancelAnalysis={cancelAnalysis}
+            runCodexAnalysis={(request) => runCodexAnalysis(request, { model: "gpt-5.6-luna", effort, timeoutMs: 180_000, signal: request.signal })}
           />
         )}
         {tab === "test" && <TestAndUse state={state} setState={setState} />}
