@@ -6,7 +6,9 @@ import Library from "./components/Library";
 import MyVoice from "./components/MyVoice";
 import TeachMyVoice from "./components/TeachMyVoice";
 import TestAndUse from "./components/TestAndUse";
-import { runCodexAnalysis, type CodexConnection, type CodexEffort } from "./core/codexAdapter";
+import { generateDraft, runCodexAnalysis, type CodexConnection, type CodexEffort } from "./core/codexAdapter";
+import type { CorrectionPairTransfer } from "./components/TestAndUse";
+import { createCorrectionRecord } from "./core/correctionEngine";
 
 type Tab = "library" | "profile" | "teach" | "test";
 
@@ -18,6 +20,7 @@ export default function App() {
   const [effort, setEffort] = useState<CodexEffort>("medium");
   const [codexConnection, setCodexConnection] = useState<CodexConnection | null>(null);
   const [analysisController, setAnalysisController] = useState(() => new AbortController());
+  const [pendingCorrectionPair, setPendingCorrectionPair] = useState<CorrectionPairTransfer | null>(null);
   const tabs: { id: Tab; label: string }[] = [
     { id: "library", label: "Library" },
     { id: "profile", label: "My Voice" },
@@ -77,6 +80,15 @@ export default function App() {
     setAnalysisController(new AbortController());
   }
 
+  function transferCorrectionPair(pair: CorrectionPairTransfer) {
+    setTab("teach");
+    setPendingCorrectionPair(pair);
+    // Teach My Voice remains the decision surface; keep the pair in the app state
+    // so a future reload does not lose the user's explicit transfer.
+    const record = createCorrectionRecord(pair);
+    setState({ ...state, corrections: [...(state.corrections ?? []), record] });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -124,9 +136,11 @@ export default function App() {
             analysisSignal={analysisController.signal}
             onCancelAnalysis={cancelAnalysis}
             runCodexAnalysis={(request) => runCodexAnalysis(request, { model: "gpt-5.6-luna", effort, timeoutMs: 180_000, signal: request.signal })}
+            initialPair={pendingCorrectionPair ?? undefined}
+            onConsumeSeed={() => setPendingCorrectionPair(null)}
           />
         )}
-        {tab === "test" && <TestAndUse state={state} setState={setState} />}
+        {tab === "test" && <TestAndUse state={state} setState={setState} generateDraft={(request) => generateDraft({ ...request, effort })} onTransferToTeach={transferCorrectionPair} />}
       </main>
 
       <footer>

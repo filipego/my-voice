@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { VoiceProposal } from "../core/codexAdapter";
 import type { AppState } from "../core/storage";
 import { classifyChanges } from "../core/diffEngine";
@@ -12,6 +12,15 @@ interface Props {
   runCodexAnalysis?: (request: { text: string; maxRules: number; signal?: AbortSignal }) => Promise<VoiceProposal[]>;
   onCancelAnalysis?: () => void;
   analysisSignal?: AbortSignal;
+  initialPair?: {
+    generatedDraft: string;
+    finalRevision: string;
+    task: string;
+    audience: string;
+    areaId: string;
+    profileVersion: number;
+  };
+  onConsumeSeed?: () => void;
 }
 
 function correctionContextMatches(
@@ -25,18 +34,27 @@ function correctionContextMatches(
     record.areaId === context.areaId;
 }
 
-export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCancelAnalysis, analysisSignal }: Props) {
-  const [before, setBefore] = useState("");
-  const [after, setAfter] = useState("");
+export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCancelAnalysis, analysisSignal, initialPair, onConsumeSeed }: Props) {
+  const [before, setBefore] = useState(initialPair?.generatedDraft ?? "");
+  const [after, setAfter] = useState(initialPair?.finalRevision ?? "");
   const [codexProposals, setCodexProposals] = useState("");
   const [codexError, setCodexError] = useState<string | null>(null);
   const [codexStatus, setCodexStatus] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [scope, setScope] = useState<"core" | "email" | "essay" | "plan" | "other">("email");
-  const [task, setTask] = useState("");
-  const [audience, setAudience] = useState("");
+  const [scope, setScope] = useState<"core" | "email" | "essay" | "plan" | "other">((initialPair?.areaId as "core" | "email" | "essay" | "plan" | "other") ?? "email");
+  const [task, setTask] = useState(initialPair?.task ?? "");
+  const [audience, setAudience] = useState(initialPair?.audience ?? "");
   const [activeRecord, setActiveRecord] = useState<CorrectionRecord | null>(null);
   const changes = before && after ? classifyChanges(before, after) : [];
+  useEffect(() => {
+    if (!initialPair) return;
+    setBefore(initialPair.generatedDraft);
+    setAfter(initialPair.finalRevision);
+    setTask(initialPair.task);
+    setAudience(initialPair.audience);
+    if (["core", "email", "essay", "plan", "other"].includes(initialPair.areaId)) setScope(initialPair.areaId as typeof scope);
+    onConsumeSeed?.();
+  }, [initialPair, onConsumeSeed]);
   const correctionContext = { generatedDraft: before, finalRevision: after, task, audience, areaId: scope };
   const draftRecord = useMemo(() => before && after ? createCorrectionRecord({
     task: task.trim() || "correction",

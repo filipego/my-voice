@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { createCodexPrompt, isVoiceProposal, parseVoiceProposals, runCodexAnalysis, type CodexJobOptions } from "../src/core/codexAdapter";
+import { createCodexPrompt, generateDraft, isVoiceProposal, parseVoiceProposals, runCodexAnalysis, type CodexJobOptions } from "../src/core/codexAdapter";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), isTauri: vi.fn() }));
 
@@ -55,5 +55,26 @@ describe("Codex analysis boundary", () => {
   it("rejects malformed output", () => {
     expect(() => parseVoiceProposals([{ nope: true }])).toThrow("no valid proposals");
     expect(isVoiceProposal({ instruction: "", evidence: [] })).toBe(false);
+  });
+
+  it("generates a baseline draft without voice guidance", async () => {
+    vi.mocked(invoke).mockResolvedValue({ text: "A baseline draft.", model: "gpt-5.6-luna", effort: "medium", areaId: "email", profileVersion: 3, usedVoice: false });
+    const result = await generateDraft({ brief: "Ask for a meeting.", audience: "client", areaId: "email", profileVersion: 3, useVoice: false });
+    expect(result.text).toBe("A baseline draft.");
+    expect(invoke).toHaveBeenCalledWith("generate_draft", {
+      brief: "Ask for a meeting.", audience: "client", areaId: "email", profileVersion: 3, useVoice: false,
+    });
+  });
+
+  it("generates an in-voice draft for the selected area and version", async () => {
+    vi.mocked(invoke).mockResolvedValue({ text: "A voice-aware draft.", model: "gpt-5.6-luna", effort: "high", areaId: "essay", profileVersion: 4, usedVoice: true });
+    const result = await generateDraft({ brief: "Explain the change.", audience: "team", areaId: "essay", profileVersion: 4, useVoice: true });
+    expect(result).toMatchObject({ text: "A voice-aware draft.", areaId: "essay", profileVersion: 4, usedVoice: true });
+  });
+
+  it("rejects empty briefs before invoking Codex and retains failures as errors", async () => {
+    await expect(generateDraft({ brief: "   ", audience: "client", areaId: "email", profileVersion: 1, useVoice: false })).rejects.toThrow("brief");
+    vi.mocked(invoke).mockRejectedValue(new Error("draft failed"));
+    await expect(generateDraft({ brief: "Write this.", audience: "client", areaId: "email", profileVersion: 1, useVoice: true })).rejects.toThrow("draft failed");
   });
 });

@@ -179,6 +179,16 @@ describe("Library reviewed imports", () => {
 });
 
 describe("Teach correction actions", () => {
+  it("prefills a transferred correction pair and consumes the seed", () => {
+    const onConsumeSeed = vi.fn();
+    render(<TeachMyVoice state={appState()} setState={vi.fn()} initialPair={{ generatedDraft: "Generated.", finalRevision: "Final.", task: "follow-up", audience: "client", areaId: "email", profileVersion: 1 }} onConsumeSeed={onConsumeSeed} />);
+    expect(screen.getByLabelText("AI draft")).toHaveValue("Generated.");
+    expect(screen.getByLabelText("Your final")).toHaveValue("Final.");
+    expect(screen.getByLabelText("Task")).toHaveValue("follow-up");
+    expect(screen.getByLabelText("Audience")).toHaveValue("client");
+    expect(onConsumeSeed).toHaveBeenCalledTimes(1);
+  });
+
   it("restores persisted decisions and targets the remaining stable proposal", () => {
     const generatedDraft = "I am writing to ask whether we can meet.";
     const finalRevision = "Can we meet?";
@@ -374,5 +384,34 @@ describe("Test and Use rollback", () => {
     expect(nextState.profile.currentVersion).toBe(2);
     expect(nextState.profile.rules).toHaveLength(1);
     expect(nextState.profile.rules[0].instruction).toBe("Open with the request.");
+  });
+
+  it("generates baseline and in-voice drafts, retains them on failure, and transfers the correction pair", async () => {
+    const setState = vi.fn();
+    const onTransferToTeach = vi.fn();
+    const generateDraft = vi.fn()
+      .mockResolvedValueOnce({ text: "Baseline copy.", model: "gpt-5.6-luna", effort: "medium", areaId: "email", profileVersion: 1, usedVoice: false })
+      .mockResolvedValueOnce({ text: "Voice copy.", model: "gpt-5.6-luna", effort: "medium", areaId: "email", profileVersion: 1, usedVoice: true });
+    render(<TestAndUse state={appState()} setState={setState} generateDraft={generateDraft} onTransferToTeach={onTransferToTeach} />);
+
+    const brief = screen.getByLabelText("Brief");
+    fireEvent.change(brief, { target: { value: "Ask for a meeting." } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate drafts" }));
+    expect(await screen.findByDisplayValue("Baseline copy.")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Voice copy.")).toBeInTheDocument();
+    expect(generateDraft).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByLabelText("Your edited draft"), { target: { value: "Edited copy." } });
+    fireEvent.click(screen.getByRole("button", { name: "Transfer correction pair" }));
+    expect(onTransferToTeach).toHaveBeenCalledWith(expect.objectContaining({ generatedDraft: "Voice copy.", finalRevision: "Edited copy.", audience: "", areaId: "email", profileVersion: 1 }));
+  });
+
+  it("disables generation for an empty brief and keeps the last draft after failure", async () => {
+    const generateDraft = vi.fn().mockRejectedValue(new Error("draft failed"));
+    render(<TestAndUse state={appState()} setState={vi.fn()} generateDraft={generateDraft} />);
+    expect(screen.getByRole("button", { name: "Generate drafts" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "Try this." } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate drafts" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("draft failed");
+    expect(screen.queryByLabelText("Your edited draft")).not.toBeInTheDocument();
   });
 });

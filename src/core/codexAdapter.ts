@@ -28,6 +28,24 @@ export interface CodexJobOptions {
   signal?: AbortSignal;
 }
 
+export interface GenerateDraftRequest {
+  brief: string;
+  audience: string;
+  areaId: string;
+  profileVersion: number;
+  useVoice: boolean;
+  effort?: CodexEffort;
+}
+
+export interface GeneratedDraft {
+  text: string;
+  model: "gpt-5.6-luna";
+  effort: CodexEffort;
+  areaId: string;
+  profileVersion: number;
+  usedVoice: boolean;
+}
+
 const defaultCodexJobOptions: CodexJobOptions = {
   model: "gpt-5.6-luna",
   effort: "medium",
@@ -79,6 +97,29 @@ export function createCodexPrompt(request: CodexAnalysisRequest): string {
     "---",
     request.text,
   ].join("\n");
+}
+
+export async function generateDraft(request: GenerateDraftRequest): Promise<GeneratedDraft> {
+  const brief = request.brief.trim();
+  if (!brief) throw new Error("A brief is required to generate a draft.");
+  const result = await invoke<unknown>("generate_draft", {
+    ...request,
+    brief,
+  });
+  if (!result || typeof result !== "object") throw new Error("Codex returned an invalid draft.");
+  const candidate = result as Partial<GeneratedDraft>;
+  if (typeof candidate.text !== "string" || !candidate.text.trim()) {
+    throw new Error("Codex returned an empty draft.");
+  }
+  const effort = candidate.effort === "high" || candidate.effort === "max" ? candidate.effort : "medium";
+  return {
+    text: candidate.text,
+    model: "gpt-5.6-luna",
+    effort,
+    areaId: typeof candidate.areaId === "string" ? candidate.areaId : request.areaId,
+    profileVersion: typeof candidate.profileVersion === "number" ? candidate.profileVersion : request.profileVersion,
+    usedVoice: candidate.usedVoice === true,
+  };
 }
 
 export async function runCodexAnalysis(

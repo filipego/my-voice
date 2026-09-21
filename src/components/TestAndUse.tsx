@@ -3,20 +3,57 @@ import type { AppState } from "../core/storage";
 import { publishVoiceSkill, restoreVoiceSkill } from "../core/storage";
 import { compileSkill } from "../core/skillCompiler";
 import { rollbackToVersion } from "../core/profileEngine";
+import { generateDraft as generateDraftWithCodex, type GeneratedDraft } from "../core/codexAdapter";
+
+export interface CorrectionPairTransfer {
+  generatedDraft: string;
+  finalRevision: string;
+  task: string;
+  audience: string;
+  areaId: string;
+  profileVersion: number;
+}
 
 interface Props {
   state: AppState;
   setState: (value: AppState) => void;
+  generateDraft?: typeof generateDraftWithCodex;
+  onTransferToTeach?: (pair: CorrectionPairTransfer) => void;
 }
 
-export default function TestAndUse({ state, setState }: Props) {
+export default function TestAndUse({ state, setState, generateDraft = generateDraftWithCodex, onTransferToTeach }: Props) {
   const [prompt, setPrompt] = useState("");
+  const [audience, setAudience] = useState("");
+  const [areaId, setAreaId] = useState("email");
+  const [editedDraft, setEditedDraft] = useState("");
+  const [drafts, setDrafts] = useState<{ baseline: GeneratedDraft; inVoice: GeneratedDraft } | null>(null);
   const [publication, setPublication] = useState<{
     path: string;
     backupPath: string | null;
   } | null>(null);
   const [status, setStatus] = useState("");
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const compiled = useMemo(() => compileSkill(state.profile), [state.profile]);
+
+  async function handleGenerateDrafts() {
+    if (!prompt.trim()) return;
+    setIsGenerating(true);
+    setDraftError(null);
+    try {
+      const request = { brief: prompt, audience, areaId, profileVersion: state.profile.currentVersion, useVoice: false } as const;
+      const [baseline, inVoice] = await Promise.all([
+        generateDraft(request),
+        generateDraft({ ...request, useVoice: true }),
+      ]);
+      setDrafts({ baseline, inVoice });
+      setEditedDraft(inVoice.text);
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Could not generate drafts.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
 
   async function handlePublish() {
     setStatus("Publishing...");
@@ -59,6 +96,30 @@ export default function TestAndUse({ state, setState }: Props) {
         </label>
         <pre className="skill-preview" aria-label="Compiled skill">{compiled.markdown}</pre>
       </div>
+      <div className="form-grid">
+        <label>Audience<input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Who is this for?" /></label>
+        <label>Voice area<select value={areaId} onChange={(event) => setAreaId(event.target.value)}><option value="email">Email</option><option value="essay">Essay</option><option value="plan">Plan</option><option value="core">Core</option></select></label>
+      </div>
+      <div className="action-row">
+        <button type="button" className="primary" onClick={handleGenerateDrafts} disabled={!prompt.trim() || isGenerating}>
+          {isGenerating ? "Generating…" : "Generate drafts"}
+        </button>
+      </div>
+      {draftError && <p role="alert" className="error">{draftError}</p>}
+      {drafts && (
+        <>
+          <div className="test-grid">
+            <label>Baseline draft<textarea value={drafts.baseline.text} readOnly rows={10} /></label>
+            <label>Your edited draft<textarea aria-label="Your edited draft" value={editedDraft} onChange={(event) => setEditedDraft(event.target.value)} rows={10} /></label>
+          </div>
+          <p className="note">
+            Baseline: {drafts.baseline.model} · {drafts.baseline.effort} · no voice guidance. In-voice: {drafts.inVoice.model} · {drafts.inVoice.effort} · {drafts.inVoice.areaId} · profile v{drafts.inVoice.profileVersion}.
+          </p>
+          <button type="button" className="chip" disabled={!editedDraft.trim()} onClick={() => onTransferToTeach?.({ generatedDraft: drafts.inVoice.text, finalRevision: editedDraft, task: prompt.trim(), audience, areaId, profileVersion: drafts.inVoice.profileVersion })}>
+            Transfer correction pair
+          </button>
+        </>
+      )}
       <div className="publish-bar">
         <button type="button" className="primary" onClick={handlePublish}>
           Publish to Codex
