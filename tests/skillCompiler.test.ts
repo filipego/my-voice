@@ -34,6 +34,7 @@ describe("skill compiler", () => {
     expect(Object.keys(packageResult.files)).toEqual([
       "SKILL.md",
       "references/business-email.md",
+      "references/essay.md",
       "references/personal-email.md",
       "references/research-notes.md",
       "references/shared-core.md",
@@ -50,7 +51,7 @@ describe("skill compiler", () => {
     expect(packageResult.manifest).toMatchObject({
       skillName: "my-voice",
       profileVersion: 7,
-      areaIds: ["business-email", "personal-email", "research-notes", "website-copy"],
+      areaIds: ["business-email", "essay", "personal-email", "research-notes", "website-copy"],
     });
   });
 
