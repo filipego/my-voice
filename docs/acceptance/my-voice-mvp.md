@@ -20,6 +20,7 @@ Date: 2026-09-21
 - Baseline/in-voice draft comparison with context-preserving Teach transfer.
 - Modular package compilation with area references, manifest checksums, anti-slop attribution, and collision-safe routing.
 - Package publication to the user Codex skill root with checksum/external-edit detection, atomic update, backup, restore, and traversal protection.
+- Test & Use anti-slop warnings with area-scoped allow/dismiss decisions persisted in app state and included in the published package.
 
 ## Not claimed complete
 
