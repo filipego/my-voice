@@ -1,5 +1,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
     collections::HashMap,
     fs,
@@ -94,6 +96,37 @@ fn build_codex_args(model: &str, effort: &str) -> Vec<String> {
         format!("model_reasoning_effort={effort}"),
         "-".into(),
     ]
+}
+
+#[cfg(unix)]
+fn configure_process_group(command: &mut Command) {
+    unsafe {
+        command.pre_exec(|| {
+            unsafe extern "C" {
+                fn setpgid(pid: i32, pgid: i32) -> i32;
+            }
+            if setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_command: &mut Command) {}
+
+fn terminate_process_tree(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+        let _ = kill(-(child.id() as i32), 9);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -291,17 +324,20 @@ fn supervise_child(
     deadline: Instant,
 ) -> Result<(), String> {
     loop {
-        match child.try_wait().map_err(|error| error.to_string())? {
-            Some(status) if status.success() => return Ok(()),
-            Some(_) => return Err("Codex analysis failed.".to_string()),
-            None if cancel_flag.load(Ordering::Relaxed) => {
-                let _ = child.kill();
-                let _ = child.wait();
+        match child.try_wait() {
+            Err(error) => {
+                terminate_process_tree(&mut child);
+                return Err(error.to_string());
+            }
+            status if cancel_flag.load(Ordering::Relaxed) => {
+                let _ = status;
+                terminate_process_tree(&mut child);
                 return Err("Codex analysis canceled.".to_string());
             }
+            Some(status) if status.success() => return Ok(()),
+            Some(_) => return Err("Codex analysis failed.".to_string()),
             None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_process_tree(&mut child);
                 return Err("Codex analysis timed out.".to_string());
             }
             None => std::thread::sleep(Duration::from_millis(25)),
@@ -316,18 +352,23 @@ fn deliver_prompt_and_supervise(
     deadline: Instant,
 ) -> Result<(), String> {
     let (writer_tx, writer_rx) = std::sync::mpsc::sync_channel(1);
-    if let Some(mut stdin) = child.stdin.take() {
+    let writer = if let Some(mut stdin) = child.stdin.take() {
         let prompt_bytes = prompt.into_bytes();
-        std::thread::spawn(move || {
+        Some(std::thread::spawn(move || {
             let result = stdin
                 .write_all(&prompt_bytes)
                 .map_err(|error| error.to_string());
             let _ = writer_tx.send(result);
-        });
+        }))
     } else {
         let _ = writer_tx.send(Ok(()));
+        None
+    };
+    let supervision = supervise_child(child, cancel_flag, deadline);
+    if let Some(writer) = writer {
+        let _ = writer.join();
     }
-    supervise_child(child, cancel_flag, deadline)?;
+    supervision?;
     match writer_rx.recv_timeout(Duration::from_millis(250)) {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(format!("Could not send the analysis prompt: {error}")),
@@ -388,13 +429,14 @@ fn run_codex_analysis_blocking(
         let _ = fs::remove_file(&output_path);
         return Err("Codex analysis canceled.".to_string());
     }
-    let child = match Command::new("codex")
+    let mut command = Command::new("codex");
+    command
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    configure_process_group(&mut command);
+    let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             remove_codex_job(&job_id);
@@ -718,6 +760,52 @@ mod tests {
             worker.join().expect("prompt worker joins").unwrap_err(),
             "Codex analysis canceled."
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_terminates_launcher_descendant_and_joins_writer() {
+        let pid_path = temp_codex_file("descendant.pid");
+        let script = format!("sleep 5 & echo $! > {}; wait", pid_path.display());
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("fake launcher starts");
+        let flag = Arc::new(AtomicBool::new(false));
+        let worker_flag = flag.clone();
+        let worker = std::thread::spawn(move || {
+            deliver_prompt_and_supervise(
+                child,
+                "é".repeat(24_000),
+                worker_flag,
+                Instant::now() + Duration::from_secs(10),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !pid_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            worker.join().expect("launcher worker joins").unwrap_err(),
+            "Codex analysis canceled."
+        );
+        let pid = fs::read_to_string(&pid_path)
+            .expect("descendant pid recorded")
+            .trim()
+            .to_string();
+        let descendant_alive = Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert!(!descendant_alive, "descendant process should be terminated");
+        let _ = fs::remove_file(pid_path);
     }
 
     #[test]
