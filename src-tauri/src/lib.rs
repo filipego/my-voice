@@ -318,6 +318,7 @@ fn temp_codex_file(suffix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("my-voice-{}-{}", unique, suffix))
 }
 
+#[cfg(test)]
 fn supervise_child(
     mut child: Child,
     cancel_flag: Arc<AtomicBool>,
@@ -329,19 +330,66 @@ fn supervise_child(
                 terminate_process_tree(&mut child);
                 return Err(error.to_string());
             }
-            status if cancel_flag.load(Ordering::Relaxed) => {
+            Ok(status) if cancel_flag.load(Ordering::Relaxed) => {
                 let _ = status;
                 terminate_process_tree(&mut child);
                 return Err("Codex analysis canceled.".to_string());
             }
-            Some(status) if status.success() => return Ok(()),
-            Some(_) => return Err("Codex analysis failed.".to_string()),
-            None if Instant::now() >= deadline => {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) => return Err("Codex analysis failed.".to_string()),
+            Ok(None) if Instant::now() >= deadline => {
                 terminate_process_tree(&mut child);
                 return Err("Codex analysis timed out.".to_string());
             }
-            None => std::thread::sleep(Duration::from_millis(25)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
         }
+    }
+}
+
+fn supervise_prompt_and_child(
+    mut child: Child,
+    writer_rx: &std::sync::mpsc::Receiver<Result<(), String>>,
+    cancel_flag: Arc<AtomicBool>,
+    deadline: Instant,
+) -> Result<(), String> {
+    let mut child_status = None;
+    let mut writer_done = false;
+    loop {
+        if let Ok(result) = writer_rx.try_recv() {
+            if let Err(error) = result {
+                terminate_process_tree(&mut child);
+                return Err(format!("Could not send the analysis prompt: {error}"));
+            }
+            writer_done = true;
+        }
+        if child_status.is_none() {
+            match child.try_wait() {
+                Err(error) => {
+                    terminate_process_tree(&mut child);
+                    return Err(error.to_string());
+                }
+                Ok(Some(status)) => child_status = Some(status),
+                Ok(None) => {}
+            }
+        }
+        if cancel_flag.load(Ordering::Relaxed) {
+            terminate_process_tree(&mut child);
+            return Err("Codex analysis canceled.".to_string());
+        }
+        if Instant::now() >= deadline {
+            terminate_process_tree(&mut child);
+            return Err("Codex analysis timed out.".to_string());
+        }
+        if let Some(status) = child_status {
+            if !status.success() {
+                terminate_process_tree(&mut child);
+                return Err("Codex analysis failed.".to_string());
+            }
+            if writer_done {
+                return Ok(());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(25));
     }
 }
 
@@ -364,7 +412,7 @@ fn deliver_prompt_and_supervise(
         let _ = writer_tx.send(Ok(()));
         None
     };
-    let supervision = supervise_child(child, cancel_flag, deadline);
+    let supervision = supervise_prompt_and_child(child, &writer_rx, cancel_flag, deadline);
     if let Some(writer) = writer {
         let _ = writer.join();
     }
@@ -805,6 +853,58 @@ mod tests {
             .map(|status| status.success())
             .unwrap_or(false);
         assert!(!descendant_alive, "descendant process should be terminated");
+        let _ = fs::remove_file(pid_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn early_launcher_exit_does_not_leave_writer_or_descendant_hanging() {
+        let pid_path = temp_codex_file("early-descendant.pid");
+        let script = format!("sleep 5 & echo $! > {}; exit 0", pid_path.display());
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("early launcher starts");
+        let flag = Arc::new(AtomicBool::new(false));
+        let worker_flag = flag.clone();
+        let worker = std::thread::spawn(move || {
+            deliver_prompt_and_supervise(
+                child,
+                "é".repeat(24_000),
+                worker_flag,
+                Instant::now() + Duration::from_secs(10),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !pid_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            worker
+                .join()
+                .expect("early launcher worker joins")
+                .unwrap_err(),
+            "Codex analysis canceled."
+        );
+        let pid = fs::read_to_string(&pid_path)
+            .expect("descendant pid recorded")
+            .trim()
+            .to_string();
+        let descendant_alive = Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert!(
+            !descendant_alive,
+            "early launcher descendant should be terminated"
+        );
         let _ = fs::remove_file(pid_path);
     }
 
