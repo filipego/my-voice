@@ -14,6 +14,17 @@ interface Props {
   analysisSignal?: AbortSignal;
 }
 
+function correctionContextMatches(
+  record: CorrectionRecord,
+  context: { generatedDraft: string; finalRevision: string; task: string; audience: string; areaId: string },
+): boolean {
+  return record.generatedDraft === context.generatedDraft &&
+    record.finalRevision === context.finalRevision &&
+    record.task === (context.task.trim() || "correction") &&
+    record.audience === (context.audience.trim() || "unspecified audience") &&
+    record.areaId === context.areaId;
+}
+
 export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCancelAnalysis, analysisSignal }: Props) {
   const [before, setBefore] = useState("");
   const [after, setAfter] = useState("");
@@ -26,6 +37,7 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   const [audience, setAudience] = useState("");
   const [activeRecord, setActiveRecord] = useState<CorrectionRecord | null>(null);
   const changes = before && after ? classifyChanges(before, after) : [];
+  const correctionContext = { generatedDraft: before, finalRevision: after, task, audience, areaId: scope };
   const draftRecord = useMemo(() => before && after ? createCorrectionRecord({
     task: task.trim() || "correction",
     audience: audience.trim() || "unspecified audience",
@@ -34,15 +46,10 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
     generatedDraft: before,
     finalRevision: after,
   }) : null, [before, after, task, audience, scope, state.profile.currentVersion]);
-  const persistedRecord = state.corrections?.find((record) =>
-    record.generatedDraft === before && record.finalRevision === after &&
-    record.task === (task.trim() || "correction") &&
-    record.audience === (audience.trim() || "unspecified audience") &&
-    record.areaId === scope,
-  ) ?? null;
+  const persistedRecord = state.corrections?.find((record) => correctionContextMatches(record, correctionContext)) ?? null;
   const rejectedProposalIds = new Set(
     (state.corrections ?? [])
-      .filter((record) => record.generatedDraft === before && record.finalRevision === after)
+      .filter((record) => correctionContextMatches(record, correctionContext))
       .flatMap((record) => record.decisions.map((decision) => decision.proposalId)),
   );
   const proposals = (draftRecord?.proposals ?? []).filter((proposal) => !rejectedProposalIds.has(proposal.id));
@@ -58,7 +65,7 @@ export default function TeachMyVoice({ state, setState, runCodexAnalysis, onCanc
   );
 
   function decide(proposalId: string, action: CorrectionDecision) {
-    const record = (activeRecord && activeRecord.generatedDraft === before && activeRecord.finalRevision === after
+    const record = (activeRecord && correctionContextMatches(activeRecord, correctionContext)
       ? activeRecord
       : persistedRecord) ?? draftRecord;
     if (!record) return;

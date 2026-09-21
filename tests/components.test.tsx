@@ -198,6 +198,20 @@ describe("Teach correction actions", () => {
     expect(setState.mock.calls[0][0].corrections[0].decisions).toHaveLength(2);
   });
 
+  it("does not reuse a correction decision when area or audience changes", () => {
+    const generatedDraft = "I am writing to ask whether we can meet.";
+    const finalRevision = "Can we meet?";
+    const record = createCorrectionRecord({ task: "follow-up", audience: "client", areaId: "email", profileVersion: 0, generatedDraft, finalRevision });
+    const rejected = decideCorrection(initialProfile, record, 0, "wrong-interpretation").record;
+    const setState = vi.fn();
+    render(<TeachMyVoice state={{ ...appState(), corrections: [rejected] }} setState={setState} />);
+    fireEvent.change(screen.getByLabelText("AI draft"), { target: { value: generatedDraft } });
+    fireEvent.change(screen.getByLabelText("Your final"), { target: { value: finalRevision } });
+    fireEvent.change(screen.getByLabelText("Audience"), { target: { value: "prospect" } });
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "essay" } });
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
   it("proposes style and audience lessons with distinct outcomes", () => {
     const setState = vi.fn();
     render(<TeachMyVoice state={appState()} setState={setState} />);
