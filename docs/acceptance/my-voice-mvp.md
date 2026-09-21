@@ -25,4 +25,5 @@ Date: 2026-09-21
 ## Not claimed complete
 
 - A launched, installed macOS desktop run through the complete workflow was not available in this acceptance pass.
+- `npx tauri dev` compiled the native target successfully, but the running window was not exposed to the desktop app inventory in this environment, so interaction proof could not be captured.
 - Codex area/version selection was not independently proven against a live discovered Codex session; publication reports reload/unverified guidance honestly.
