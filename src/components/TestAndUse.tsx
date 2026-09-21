@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { AppState } from "../core/storage";
 import { publishVoiceSkill, restoreVoiceSkill } from "../core/storage";
 import { compileSkillPackage } from "../core/skillCompiler";
+import { applyAntiSlopDecision, detectAntiSlopWarnings, type AntiSlopDecision } from "../core/antiSlop";
 import { rollbackToVersion } from "../core/profileEngine";
 import { generateDraft as generateDraftWithCodex, type GeneratedDraft } from "../core/codexAdapter";
 
@@ -35,6 +36,11 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
   const [draftError, setDraftError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const compiled = useMemo(() => compileSkillPackage(state.profile, { antiSlop: state.antiSlop }), [state.profile, state.antiSlop]);
+  const warnings = useMemo(() => detectAntiSlopWarnings(editedDraft, { areaId, config: state.antiSlop }), [editedDraft, areaId, state.antiSlop]);
+
+  function decideAntiSlop(ruleId: string, decision: Exclude<AntiSlopDecision, "warn">) {
+    setState({ ...state, antiSlop: applyAntiSlopDecision(state.antiSlop, areaId, ruleId, decision) });
+  }
 
   async function handleGenerateDrafts() {
     if (!prompt.trim()) return;
@@ -120,6 +126,12 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
           <p className="note">
             Baseline: {drafts.baseline.model} · {drafts.baseline.effort} · no voice guidance. In-voice: {drafts.inVoice.model} · {drafts.inVoice.effort} · {drafts.inVoice.areaId} · profile v{drafts.inVoice.profileVersion}.
           </p>
+          {warnings.length > 0 && <div className="note" aria-label="Anti-slop warnings">
+            <strong>Advisory writing warnings</strong>
+            <ul className="proposal-list">
+              {warnings.map((warning) => <li key={warning.ruleId}><span>{warning.excerpt} — {warning.explanation}</span><div className="action-row"><button type="button" className="chip" onClick={() => decideAntiSlop(warning.ruleId, "allowed")}>Allow here</button><button type="button" className="chip" onClick={() => decideAntiSlop(warning.ruleId, "dismissed")}>Dismiss here</button></div></li>)}
+            </ul>
+          </div>}
           <button type="button" className="chip" disabled={!editedDraft.trim()} onClick={() => onTransferToTeach?.({ generatedDraft: drafts.inVoice.text, finalRevision: editedDraft, task: drafts.context.brief, audience: drafts.context.audience, areaId: drafts.context.areaId, profileVersion: drafts.context.profileVersion })}>
             Transfer correction pair
           </button>
