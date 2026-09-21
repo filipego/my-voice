@@ -748,8 +748,9 @@ fn sanitize_skill_name(name: &str) -> String {
 fn skill_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
-        .app_data_dir()
+        .home_dir()
         .map_err(|error| error.to_string())?
+        .join(".codex")
         .join("skills");
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     Ok(dir)
@@ -799,6 +800,12 @@ fn read_installed_manifest(target: &PathBuf) -> Result<(), String> {
     let manifest_path = target.join("manifest.json");
     let raw = fs::read_to_string(&manifest_path).map_err(|_| "Installed skill has no manifest; refusing overwrite.".to_string())?;
     let manifest: serde_json::Value = serde_json::from_str(&raw).map_err(|_| "Installed skill manifest is invalid.".to_string())?;
+    let metadata_path = target.join(".my-voice-publish.json");
+    let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string(&metadata_path).map_err(|_| "Installed skill publication metadata is missing.".to_string())?)
+        .map_err(|_| "Installed skill publication metadata is invalid.".to_string())?;
+    if metadata.get("manifestChecksum").and_then(serde_json::Value::as_str) != Some(package_checksum(&raw).as_str()) {
+        return Err("Installed skill manifest was externally edited.".to_string());
+    }
     let files = collect_package_files(target, &manifest)?;
     let name = manifest.get("skillName").and_then(serde_json::Value::as_str).unwrap_or_default();
     let version = manifest.get("profileVersion").and_then(serde_json::Value::as_u64).unwrap_or_default() as u32;
@@ -815,6 +822,20 @@ fn collect_package_files(root: &PathBuf, manifest: &serde_json::Value) -> Result
         }
     }
     files.insert("manifest.json".to_string(), fs::read_to_string(root.join("manifest.json")).map_err(|_| "Installed skill manifest is unreadable.".to_string())?);
+    fn walk(root: &PathBuf, current: &PathBuf, found: &mut Vec<String>) -> Result<(), String> {
+        for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if path.file_name().and_then(|v| v.to_str()) == Some(".my-voice-publish.json") { continue; }
+            if path.is_dir() { walk(root, &path, found)?; } else if let Ok(relative) = path.strip_prefix(root) { found.push(relative.to_string_lossy().replace('\\', "/")); }
+        }
+        Ok(())
+    }
+    let mut found = Vec::new();
+    walk(root, root, &mut found)?;
+    let expected: std::collections::HashSet<_> = files.keys().cloned().collect();
+    if found.iter().any(|path| !expected.contains(path)) || found.len() != expected.len() {
+        return Err("Installed skill contains unexpected files.".to_string());
+    }
     Ok(files)
 }
 
@@ -841,6 +862,8 @@ fn publish_skill_package(root: &PathBuf, request: &SkillRequest) -> Result<Skill
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
         fs::write(destination, content).map_err(|error| error.to_string())?;
     }
+    let manifest_raw = files.get("manifest.json").expect("validated manifest");
+    fs::write(temp.join(".my-voice-publish.json"), serde_json::json!({"manifestChecksum": package_checksum(manifest_raw)}).to_string()).map_err(|error| error.to_string())?;
     let mut backup_path = None;
     if target.exists() {
         let backup_root = root.join("backups");
@@ -866,11 +889,16 @@ fn publish_voice_skill(
 }
 
 fn restore_skill_package(root: &PathBuf, skill_path: PathBuf, backup_path: Option<PathBuf>) -> Result<SkillPublication, String> {
-    if !skill_path.starts_with(root) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
+    if !skill_path.starts_with(root) || skill_path == *root || skill_path.parent() != Some(root.as_path()) { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
     if let Some(backup_path) = backup_path {
-        if !backup_path.starts_with(root.join("backups")) || !backup_path.exists() { return Err("The selected skill backup does not exist.".to_string()); }
-        if skill_path.exists() { fs::remove_dir_all(&skill_path).map_err(|error| error.to_string())?; }
-        fs::rename(&backup_path, &skill_path).map_err(|error| error.to_string())?;
+        if !backup_path.starts_with(root.join("backups")) || backup_path.parent() != Some(root.join("backups").as_path()) || !backup_path.is_dir() { return Err("The selected skill backup does not exist.".to_string()); }
+        let displaced = root.join(format!(".restore-displaced-{}", SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_millis()));
+        if skill_path.exists() { fs::rename(&skill_path, &displaced).map_err(|error| error.to_string())?; }
+        if let Err(error) = fs::rename(&backup_path, &skill_path) {
+            if displaced.exists() { let _ = fs::rename(&displaced, &skill_path); }
+            return Err(error.to_string());
+        }
+        let _ = fs::remove_dir_all(displaced);
         return Ok(SkillPublication { path: skill_path.to_string_lossy().to_string(), backup_path: None, version: 0, status: "installed".into() });
     }
     if skill_path.exists() { fs::remove_dir_all(&skill_path).map_err(|error| error.to_string())?; }
@@ -887,6 +915,7 @@ fn restore_voice_skill(
     let skill_path = if requested.is_absolute() {
         requested
     } else {
+        if safe_package_path(&request.path).is_err() { return Err("Skill restore path is outside the My Voice skill folder.".to_string()); }
         root.join(request.path)
     };
     restore_skill_package(&root, skill_path, request.backup_path.map(PathBuf::from))
@@ -1214,6 +1243,12 @@ mod tests {
         let first = publish_skill_package(&root, &request).unwrap();
         fs::write(PathBuf::from(&first.path).join("SKILL.md"), "tampered").unwrap();
         assert!(publish_skill_package(&root, &request).unwrap_err().contains("checksum"));
+        fs::write(PathBuf::from(&first.path).join("SKILL.md"), "# My Voice\n").unwrap();
+        fs::write(PathBuf::from(&first.path).join("manifest.json"), "{}\n").unwrap();
+        assert!(publish_skill_package(&root, &request).unwrap_err().contains("manifest"));
+        fs::write(PathBuf::from(&first.path).join("manifest.json"), serde_json::to_string_pretty(request.manifest.as_ref().unwrap()).unwrap()).unwrap();
+        fs::write(PathBuf::from(&first.path).join("unexpected.txt"), "x").unwrap();
+        assert!(publish_skill_package(&root, &request).unwrap_err().contains("unexpected"));
         let mut unsafe_request = package_fixture(&root);
         unsafe_request.files.insert("../escape.md".into(), "x".into());
         assert!(publish_skill_package(&root, &unsafe_request).unwrap_err().contains("unsafe path"));

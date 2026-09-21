@@ -70,11 +70,10 @@ export default function TestAndUse({ state, setState, generateDraft = generateDr
         compiled.manifest,
       );
       setPublication({ path: result.path, backupPath: result.backupPath });
-      setStatus(
-        result.backupPath
-          ? `Published to ${result.path}. Previous skill backed up.`
-          : `Published to ${result.path}.`,
-      );
+      const reloadNote = result.status === "needs-reload" || result.status === "pending-update"
+        ? " Reload Codex to discover the change."
+        : " Codex discovery is not verified yet; reload before relying on it.";
+      setStatus(`${result.backupPath ? "Published update" : "Published"} to ${result.path}.${result.backupPath ? " Previous skill backed up." : ""}${reloadNote}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
