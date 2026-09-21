@@ -353,6 +353,7 @@ fn run_codex_analysis_blocking(
     let max_rules = max_rules.unwrap_or(5).clamp(1, 20);
     let mut text = text.trim().to_string();
     if text.is_empty() {
+        remove_codex_job(&job_id);
         return Err("No approved writing is available to analyze.".to_string());
     }
     text = text.chars().take(24_000).collect();
@@ -362,8 +363,15 @@ fn run_codex_analysis_blocking(
     );
     let schema_path = temp_codex_file("schema.json");
     let output_path = temp_codex_file("proposals.json");
-    fs::write(&schema_path, r#"{"type":"array","items":{"type":"object","properties":{"instruction":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"scope":{"type":"string"}},"required":["instruction"],"additionalProperties":false}}"#)
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = fs::write(
+        &schema_path,
+        r#"{"type":"array","items":{"type":"object","properties":{"instruction":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"scope":{"type":"string"}},"required":["instruction"],"additionalProperties":false}}"#,
+    ) {
+        remove_codex_job(&job_id);
+        let _ = fs::remove_file(&schema_path);
+        let _ = fs::remove_file(&output_path);
+        return Err(error.to_string());
+    }
 
     if !job_can_start(&cancel_flag) {
         remove_codex_job(&job_id);
